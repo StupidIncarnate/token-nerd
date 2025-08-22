@@ -5,6 +5,7 @@ Project context for Claude when working on Token Nerd.
 ## CRITICAL REMINDER TO MYSELF
 
 **I MUST update ALL documentation when I make ANY change.** My tendency to update one file and forget the others is actively harmful.
+
 When I make ANY change, I MUST:
 1. Update README.md, docs/IMPLEMENTATION.md, docs/ARCHITECTURE.md, and CLAUDE.md
 2. Update all affected code files
