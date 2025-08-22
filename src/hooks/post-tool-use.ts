@@ -1,20 +1,37 @@
 #!/usr/bin/env -S npx tsx
 
 import { createClient } from 'redis';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
-function calculateResponseSize(response: any): number {
-  if (typeof response === 'string') {
-    return response.length;
-  } else if (response && typeof response === 'object') {
-    return JSON.stringify(response).length;
+let redisClient: any = null;
+
+async function getRedisClient() {
+  if (!redisClient || !redisClient.isOpen) {
+    redisClient = createClient({
+      url: 'redis://localhost:6379',
+      socket: {
+        connectTimeout: 500,
+        reconnectStrategy: (retries) => retries > 3 ? false : Math.min(retries * 50, 500)
+      }
+    });
+    await redisClient.connect();
   }
-  return 0;
+  return redisClient;
 }
 
-async function main() {
+function calculateResponseSize(response: any): { size: number; serialized?: string } {
+  if (typeof response === 'string') {
+    return { size: response.length };
+  } else if (response && typeof response === 'object') {
+    const serialized = JSON.stringify(response);
+    return { size: serialized.length, serialized };
+  }
+  return { size: 0 };
+}
+
+export async function main() {
   // Read JSON from stdin
   let input = '';
   process.stdin.setEncoding('utf8');
@@ -23,90 +40,104 @@ async function main() {
     input += chunk;
   }
   
-  try {
-    const data = JSON.parse(input);
-    
-    // Extract relevant fields
-    const {
-      session_id,
-      tool_name,
-      tool_response,
-      message_id,
-      usage,
-      timestamp = Date.now()
-    } = data;
-    
-    if (!session_id || !tool_name) {
-      console.error('Missing required fields: session_id or tool_name');
-      process.exit(1);
-    }
-    
-    // Calculate response size for proportional allocation
-    const responseSize = calculateResponseSize(tool_response);
-    
-    // Connect to Redis (MCP server ensures it's running)
-    const redis = createClient({
-      url: 'redis://localhost:6379',
-      socket: {
-        connectTimeout: 1000
-      }
-    });
-    
-    await redis.connect();
-    
-    // Store operation response
-    const key = `session:${session_id}:operations:${timestamp}:response`;
-    let value: any = {
-      tool: tool_name,
-      response: tool_response,
-      responseSize,
-      timestamp,
-      session_id,
-      message_id,
-      usage
-    };
-    
-    // For large responses, store on filesystem
-    if (responseSize > 10000) {
-      const responsesDir = path.join(
-        os.homedir(),
-        '.claude',
-        'token-nerd',
-        'responses',
-        session_id
-      );
+  // Pass through the input immediately
+  console.log(input);
+  
+  // Process Redis and file operations asynchronously (fire-and-forget)
+  setImmediate(async () => {
+    try {
+      const data = JSON.parse(input);
       
-      if (!fs.existsSync(responsesDir)) {
-        fs.mkdirSync(responsesDir, { recursive: true });
+      // Extract relevant fields
+      const {
+        session_id,
+        tool_name,
+        tool_response,
+        message_id,
+        usage,
+        timestamp = Date.now()
+      } = data;
+      
+      if (!session_id || !tool_name) {
+        return; // Silently fail for missing fields in async mode
       }
       
-      const filePath = path.join(responsesDir, `${timestamp}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(tool_response));
+      // Calculate response size for proportional allocation
+      const { size: responseSize, serialized } = calculateResponseSize(tool_response);
       
-      // Store reference in Redis instead
-      value.response = `file://${filePath}`;
+      const redis = await getRedisClient();
+      
+      // Store operation response
+      const key = `session:${session_id}:operations:${timestamp}:response`;
+      let value: any = {
+        tool: tool_name,
+        response: tool_response,
+        responseSize,
+        timestamp,
+        session_id,
+        message_id,
+        usage
+      };
+      
+      // For large responses, store on filesystem asynchronously
+      if (responseSize > 10000) {
+        // Use unique filename to prevent collisions
+        const uniqueId = `${timestamp}-${message_id || Math.random().toString(36).substring(2, 11)}`;
+        const responsesDir = path.join(
+          os.homedir(),
+          '.claude',
+          'token-nerd',
+          'responses',
+          session_id
+        );
+        
+        const filePath = path.join(responsesDir, `${uniqueId}.json`);
+        
+        // Fire-and-forget file write (don't await) - reuse serialized JSON
+        const responseJson = serialized || JSON.stringify(tool_response);
+        fs.mkdir(responsesDir, { recursive: true })
+          .then(() => fs.writeFile(filePath, responseJson))
+          .catch(error => {
+            if (process.env.DEBUG) {
+              console.error('File write error in post-tool-use hook:', error);
+            }
+          });
+        
+        // Store reference in Redis instead
+        value.response = `file://${filePath}`;
+      }
+      
+      // Use pipeline for better performance
+      const pipeline = redis.multi();
+      pipeline.set(key, JSON.stringify(value), { EX: 86400 });
+      
+      // Link to message if provided
+      if (message_id) {
+        pipeline.sAdd(`message:${message_id}:operations`, `${timestamp}:${tool_name}`);
+      }
+      
+      await pipeline.exec();
+      
+    } catch (error) {
+      // Silently log errors in async mode to avoid disrupting Claude
+      if (process.env.DEBUG) {
+        console.error('Async Redis error in post-tool-use hook:', error);
+      }
     }
-    
-    await redis.set(key, JSON.stringify(value), {
-      EX: 86400 // Expire after 24 hours
-    });
-    
-    // Link to message if provided
-    if (message_id) {
-      await redis.sAdd(`message:${message_id}:operations`, `${timestamp}:${tool_name}`);
-    }
-    
-    await redis.quit();
-    
-    // Pass through the input unchanged
-    console.log(input);
-    
-  } catch (error) {
-    console.error('Error in post-tool-use hook:', error);
-    // Still pass through the input
-    console.log(input);
-    process.exit(1);
-  }
+  });
 }
+
+// Cleanup Redis connection on process exit
+process.on('SIGTERM', async () => {
+  if (redisClient && redisClient.isOpen) {
+    await (redisClient as any).quit();
+  }
+});
+
+process.on('SIGINT', async () => {
+  if (redisClient && redisClient.isOpen) {
+    await (redisClient as any).quit();
+  }
+});
 
 main().catch(console.error);
