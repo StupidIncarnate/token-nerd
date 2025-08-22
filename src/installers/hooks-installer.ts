@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { BaseInstaller } from './base-installer';
-import { getClaudeHooksDir } from './utils';
+import { getClaudeHooksDir, getClaudeSettingsPath } from './utils';
 
 export class HooksInstaller extends BaseInstaller {
   private hooksDir: string;
@@ -20,12 +20,13 @@ export class HooksInstaller extends BaseInstaller {
   }
 
   async doInstall(): Promise<void> {
-    // Ensure hooks directory exists
+    // First, ensure hooks directory exists and create symlinks (for backwards compatibility)
     if (!fs.existsSync(this.hooksDir)) {
       fs.mkdirSync(this.hooksDir, { recursive: true });
       console.log(`✓ Created hooks directory: ${this.hooksDir}`);
     }
 
+    // Create hook files in the directory
     for (const hook of this.hooks) {
       const sourcePath = path.join(this.sourceDir, `${hook}.ts`);
       const targetPath = path.join(this.hooksDir, hook);
@@ -73,9 +74,75 @@ export class HooksInstaller extends BaseInstaller {
       fs.chmodSync(targetPath, 0o755);
       console.log(`✓ Made executable: ${hook}`);
     }
+
+    // Now configure hooks in settings.json (the modern approach)
+    await this.configureHooksInSettings();
+  }
+
+  private async configureHooksInSettings(): Promise<void> {
+    const settingsPath = getClaudeSettingsPath();
+    
+    // Read existing settings or create empty object
+    let settings: any = {};
+    if (fs.existsSync(settingsPath)) {
+      await this.createBackup(settingsPath, 'install');
+      try {
+        const content = fs.readFileSync(settingsPath, 'utf8');
+        settings = JSON.parse(content);
+      } catch (error) {
+        console.warn(`⚠️  Could not parse existing settings.json, creating new one`);
+        settings = {};
+      }
+    } else {
+      // Ensure directory exists
+      const settingsDir = path.dirname(settingsPath);
+      if (!fs.existsSync(settingsDir)) {
+        fs.mkdirSync(settingsDir, { recursive: true });
+      }
+    }
+
+    // Add hook configuration
+    if (!settings.hooks) {
+      settings.hooks = {};
+    }
+
+    const preHookPath = path.join(this.hooksDir, 'pre-tool-use');
+    const postHookPath = path.join(this.hooksDir, 'post-tool-use');
+
+    settings.hooks.PreToolUse = [
+      {
+        matcher: "*",
+        hooks: [
+          {
+            type: "command",
+            command: preHookPath
+          }
+        ]
+      }
+    ];
+
+    settings.hooks.PostToolUse = [
+      {
+        matcher: "*",
+        hooks: [
+          {
+            type: "command", 
+            command: postHookPath
+          }
+        ]
+      }
+    ];
+
+    // Write updated settings
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    console.log(`✓ Added hook configuration to ${settingsPath}`);
   }
 
   async doUninstall(): Promise<void> {
+    // Remove hook configuration from settings.json
+    await this.removeHooksFromSettings();
+
+    // Remove hook files from directory
     for (const hook of this.hooks) {
       const targetPath = path.join(this.hooksDir, hook);
       
@@ -97,11 +164,42 @@ export class HooksInstaller extends BaseInstaller {
       }
     }
 
-    // Restore backed up hooks
+    // Restore backed up hooks and settings
     await this.restoreBackupsForComponent();
   }
 
+  private async removeHooksFromSettings(): Promise<void> {
+    const settingsPath = getClaudeSettingsPath();
+    
+    if (!fs.existsSync(settingsPath)) {
+      return; // No settings file to modify
+    }
+
+    try {
+      const content = fs.readFileSync(settingsPath, 'utf8');
+      const settings = JSON.parse(content);
+      
+      if (settings.hooks) {
+        // Remove our hook configurations
+        delete settings.hooks.PreToolUse;
+        delete settings.hooks.PostToolUse;
+        
+        // If hooks object is now empty, remove it entirely
+        if (Object.keys(settings.hooks).length === 0) {
+          delete settings.hooks;
+        }
+        
+        // Write updated settings
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        console.log(`✓ Removed hook configuration from ${settingsPath}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️  Could not update settings.json during uninstall: ${error}`);
+    }
+  }
+
   async checkInstalled(): Promise<boolean> {
+    // Check hook files in directory
     for (const hook of this.hooks) {
       const targetPath = path.join(this.hooksDir, hook);
       const sourcePath = path.join(this.sourceDir, `${hook}.ts`);
@@ -120,7 +218,50 @@ export class HooksInstaller extends BaseInstaller {
       }
     }
     
-    return true;
+    // Check settings.json configuration
+    return this.checkSettingsConfiguration();
+  }
+
+  private checkSettingsConfiguration(): boolean {
+    const settingsPath = getClaudeSettingsPath();
+    
+    if (!fs.existsSync(settingsPath)) {
+      return false;
+    }
+
+    try {
+      const content = fs.readFileSync(settingsPath, 'utf8');
+      const settings = JSON.parse(content);
+      
+      if (!settings.hooks) {
+        return false;
+      }
+
+      // Check if our hook configuration exists
+      const hasPreHook = settings.hooks.PreToolUse && 
+        Array.isArray(settings.hooks.PreToolUse) &&
+        settings.hooks.PreToolUse.some((config: any) => 
+          config.matcher === "*" && 
+          config.hooks?.some((hook: any) => 
+            hook.type === "command" && 
+            hook.command?.includes('pre-tool-use')
+          )
+        );
+
+      const hasPostHook = settings.hooks.PostToolUse &&
+        Array.isArray(settings.hooks.PostToolUse) &&
+        settings.hooks.PostToolUse.some((config: any) => 
+          config.matcher === "*" && 
+          config.hooks?.some((hook: any) => 
+            hook.type === "command" && 
+            hook.command?.includes('post-tool-use')
+          )
+        );
+
+      return hasPreHook && hasPostHook;
+    } catch (error) {
+      return false;
+    }
   }
 
   async validateInstallation(): Promise<boolean> {

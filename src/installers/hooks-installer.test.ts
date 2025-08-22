@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { HooksInstaller } from './hooks-installer';
-import { TEST_TEMP_DIR, TEST_HOOKS_DIR, createMockFiles } from '../test-setup';
+import { TEST_TEMP_DIR, TEST_HOOKS_DIR, TEST_CLAUDE_DIR, createMockFiles } from '../test-setup';
 
 // Mock process.cwd to return test directory
 const originalCwd = process.cwd;
@@ -41,6 +41,45 @@ describe('HooksInstaller', () => {
       
       expect(preTarget).toBe(path.join(sourceDir, 'pre-tool-use.ts'));
       expect(postTarget).toBe(path.join(sourceDir, 'post-tool-use.ts'));
+    });
+
+    it('should configure hooks in settings.json', async () => {
+      await installer.doInstall();
+      
+      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+      
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks).toBeDefined();
+      expect(settings.hooks.PreToolUse).toBeDefined();
+      expect(settings.hooks.PostToolUse).toBeDefined();
+      
+      const preConfig = settings.hooks.PreToolUse[0];
+      const postConfig = settings.hooks.PostToolUse[0];
+      
+      expect(preConfig.matcher).toBe('*');
+      expect(preConfig.hooks[0].type).toBe('command');
+      expect(preConfig.hooks[0].command).toContain('pre-tool-use');
+      
+      expect(postConfig.matcher).toBe('*');
+      expect(postConfig.hooks[0].type).toBe('command');
+      expect(postConfig.hooks[0].command).toContain('post-tool-use');
+    });
+
+    it('should preserve existing settings.json content', async () => {
+      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
+      const existingSettings = {
+        model: 'opus',
+        statusLine: { type: 'command', command: 'echo test' }
+      };
+      fs.writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2));
+      
+      await installer.doInstall();
+      
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.model).toBe('opus');
+      expect(settings.statusLine).toEqual(existingSettings.statusLine);
+      expect(settings.hooks).toBeDefined();
     });
 
     it('should make hooks executable', async () => {
@@ -114,6 +153,40 @@ describe('HooksInstaller', () => {
       expect(fs.existsSync(postHookPath)).toBe(false);
     });
 
+    it('should remove hook configuration from settings.json', async () => {
+      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
+      
+      // Verify hooks are configured after install
+      let settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks).toBeDefined();
+      expect(settings.hooks.PreToolUse).toBeDefined();
+      expect(settings.hooks.PostToolUse).toBeDefined();
+      
+      await installer.doUninstall();
+      
+      // Verify hooks configuration is removed
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks).toBeUndefined();
+    });
+
+    it('should preserve other settings when removing hooks', async () => {
+      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
+      
+      // Add some other settings
+      let settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      settings.model = 'opus';
+      settings.customSetting = 'test';
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      
+      await installer.doUninstall();
+      
+      // Verify other settings are preserved
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.model).toBe('opus');
+      expect(settings.customSetting).toBe('test');
+      expect(settings.hooks).toBeUndefined();
+    });
+
     it('should not remove non-symlink hooks', async () => {
       const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
       
@@ -178,7 +251,37 @@ describe('HooksInstaller', () => {
       expect(result).toBe(false);
     });
 
-    it('should return true if all hooks are correctly installed', async () => {
+    it('should return false if hooks exist but settings.json not configured', async () => {
+      // Create hook files but not settings.json configuration
+      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
+      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
+      fs.symlinkSync(path.join(sourceDir, 'pre-tool-use.ts'), preHookPath);
+      fs.symlinkSync(path.join(sourceDir, 'post-tool-use.ts'), postHookPath);
+      fs.chmodSync(preHookPath, 0o755);
+      fs.chmodSync(postHookPath, 0o755);
+      
+      const result = await installer.checkInstalled();
+      expect(result).toBe(false);
+    });
+
+    it('should return false if settings.json exists but missing hook configuration', async () => {
+      // Create hook files
+      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
+      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
+      fs.symlinkSync(path.join(sourceDir, 'pre-tool-use.ts'), preHookPath);
+      fs.symlinkSync(path.join(sourceDir, 'post-tool-use.ts'), postHookPath);
+      fs.chmodSync(preHookPath, 0o755);
+      fs.chmodSync(postHookPath, 0o755);
+      
+      // Create settings.json without hook configuration
+      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({ model: 'opus' }, null, 2));
+      
+      const result = await installer.checkInstalled();
+      expect(result).toBe(false);
+    });
+
+    it('should return true if all hooks are correctly installed and configured', async () => {
       await installer.doInstall();
       
       const result = await installer.checkInstalled();

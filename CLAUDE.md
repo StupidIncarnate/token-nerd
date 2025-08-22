@@ -19,6 +19,7 @@ My past mistakes to NOT repeat:
 - Left old .js files next to new .ts files
 - Thought "updating README is enough" when 4 other docs needed changes
 - **DELETED STATUSLINE INTEGRATION FILES - NEVER DO THIS AGAIN**
+- **FIXED: Used outdated hook directory approach instead of settings.json** (RESOLVED Aug 2025)
 
 **My rule: If I change it in one place, I MUST update it everywhere or I'm sabotaging the project.**
 
@@ -70,9 +71,12 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 - Backs up existing statusline, enhances or creates new one
 - **NEVER DELETE** - This is how users see real-time progress
 
-**Hooks** (`~/.config/claude/hooks/`)
-- `pre-tool-use` - TypeScript executable that captures tool name, parameters
-- `post-tool-use` - TypeScript executable that captures tool response/output
+**Hooks** (Modern `~/.claude/settings.json` Configuration)
+- **Configuration**: `PreToolUse`/`PostToolUse` events with `matcher: "*"` in settings.json
+- **Files**: Symlinks in `~/.config/claude/hooks/` pointing to TypeScript executables
+- `pre-tool-use` - Captures tool name, parameters, writes to Redis
+- `post-tool-use` - Captures tool response/output, calculates response size
+- **CRITICAL**: Uses settings.json approach (not legacy directory-based)
 
 **CLI Tools** (global after `npm install -g token-nerd`)
 - `token-nerd` - Interactive TUI (coming soon - currently just statusline works)
@@ -150,10 +154,11 @@ src/
 └── mcp-server/                 # Redis lifecycle management
 
 # INSTALLED FILES
-~/.claude/statusline-command.sh     # CREATED BY INSTALLERS
-~/.config/claude/hooks/pre-tool-use # SYMLINK TO src/hooks/
-~/.config/claude/hooks/post-tool-use# SYMLINK TO src/hooks/
-~/.claude.json                      # ENHANCED WITH MCP SERVER
+~/.claude/statusline-command.sh        # CREATED BY INSTALLERS
+~/.claude/settings.json                # HOOK CONFIGURATION (PreToolUse/PostToolUse)
+~/.config/claude/hooks/pre-tool-use    # SYMLINK TO src/hooks/
+~/.config/claude/hooks/post-tool-use   # SYMLINK TO src/hooks/
+~/.claude.json                         # ENHANCED WITH MCP SERVER
 ```
 
 ## Testing Approach
@@ -181,19 +186,23 @@ Verify Redis is running: `redis-cli ping` should return PONG.
 
 ## Current Status
 
-✅ **COMPLETED:**
-- Clean class-based installer architecture
-- Comprehensive test coverage (155/155 tests passing)
-- Statusline integration working (`🐿️ 117,360 (75%)`)
-- MCP server with proper JSON-RPC protocol
-- Atomic install/uninstall with rollback
-- System file backup management
+✅ **COMPONENT 1: STATUSLINE INTEGRATION - FULLY WORKING**
+- Real-time accurate token counts (`🐿️ 156,107 (100%)`)
+- Clean installer architecture with 155 passing tests
 - Cross-platform path utilities (Windows/Unix)
-- Proper hook directory structure (`~/.config/claude/hooks/`)
+- System file backup management
+- Atomic install/uninstall with rollback
 
-🚧 **TODO:**
-- Interactive TUI for analysis CLI
-- Session selection and historical analysis
-- Operation detail drill-down
+✅ **COMPONENT 2: ANALYSIS CLI - DATA CAPTURE WORKING**
+- ✅ **CRITICAL FIX (Aug 2025)**: Updated hooks to use `~/.claude/settings.json` (modern approach)
+- ✅ **VERIFIED WORKING**: Hooks now fire during live Claude operations
+- ✅ **REDIS DATA FLOWING**: Pre/post tool operations captured with session IDs, timestamps, response sizes
+- ✅ MCP server manages Redis lifecycle automatically
+- ✅ Session tracking and selection infrastructure
 
-**NEVER GO BACKWARDS:** The clean architecture is working perfectly. Don't revert to messy scripts.
+🚧 **COMPONENT 2: ANALYSIS CLI - TUI PENDING**
+- ❌ Interactive TUI for operation analysis
+- ❌ Token correlation engine (merge hook data + JSONL)
+- ❌ Drill-down detail view
+
+**NEVER GO BACKWARDS:** Both the installer architecture AND the hook integration are working perfectly.

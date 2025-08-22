@@ -1,5 +1,16 @@
 # Implementation Plan
 
+## CURRENT STATUS (Updated Aug 2025)
+
+✅ **COMPLETED STEPS:**
+- ✅ Step 0: MCP Server & Package Setup - **COMPLETED via postinstall script**
+- ✅ Step 1: Hook Infrastructure - **COMPLETED with settings.json approach**
+- ✅ Step 2: Session Tracking System - **COMPLETED**
+- ❌ Step 3: Interactive TUI with Token Correlation - **PENDING**
+- ❌ Step 4: Drill-Down Detail View - **PENDING**
+
+**KEY ACHIEVEMENT**: Hooks are now firing and capturing data to Redis in real-time.
+
 ## Objective
 Enable users to see a chronological, sortable list of ALL token-consuming operations across any session, with ability to drill into the actual content that caused token costs.
 
@@ -14,12 +25,12 @@ Enable users to see a chronological, sortable list of ALL token-consuming operat
 - MCP server that manages Redis lifecycle
 - When Claude starts: MCP starts → Redis starts
 - When Claude stops: MCP stops → Redis stops
-- install-mcp command adds server to ~/.claude.json
-- install-hooks command sets up operation capture
+- ✅ **COMPLETED**: Automatic setup via postinstall script adds server to ~/.claude.json
+- ✅ **COMPLETED**: Automatic hook configuration in ~/.claude/settings.json
 
 ### What we build
 - Main CLI entry point with commander
-- install-hooks command that creates symlinks
+- ✅ **COMPLETED**: Automatic installation via postinstall script (no manual commands needed)
 - Package.json with proper bin configuration
 
 ### Implementation Details
@@ -29,12 +40,12 @@ Enable users to see a chronological, sortable list of ALL token-consuming operat
 
 import { program } from 'commander';
 
+// ✅ OBSOLETE: Manual install commands removed
+// Now handled automatically by postinstall script via TokenNerdInstaller
 program
-  .command('install-hooks')
-  .description('Install pre/post hooks for Claude Code')
+  .option('--statusline', 'Output formatted token count for statusline')
   .action(() => {
-    // Create symlinks from ~/.config/claude/hooks/ to our src/hooks/
-    // chmod +x the hook files
+    // Interactive TUI (coming soon)
   });
 
 // Main command (default when no subcommand specified)
@@ -57,15 +68,26 @@ program
 
 ### User Acceptance Test
 ```bash
-$ npx token-nerd install-hooks
+$ npm install -g token-nerd
+# Postinstall script automatically runs:
+✓ Added Token Nerd MCP server to ~/.claude.json
 ✓ Created symlink: ~/.config/claude/hooks/pre-tool-use -> token-nerd/src/hooks/pre-tool-use.ts
 ✓ Created symlink: ~/.config/claude/hooks/post-tool-use -> token-nerd/src/hooks/post-tool-use.ts
-✓ Hooks installed successfully
+✓ Added hook configuration to ~/.claude/settings.json
+✓ Created statusline integration
+✓ Installation complete - restart Claude Code
 ```
 
 ---
 
-## Step 1: Hook Infrastructure (2 hours)
+## Step 1: Hook Infrastructure (2 hours) ✅ **COMPLETED**
+
+**✅ COMPLETION STATUS (Aug 2025):**
+- ✅ Modern settings.json configuration approach implemented
+- ✅ Pre/post-tool-use hooks firing and writing to Redis
+- ✅ Verified working with live Claude Code operations
+- ✅ Session IDs, timestamps, response sizes all captured
+- ✅ Large response handling (filesystem storage for >10KB responses)
 
 ### What we build
 - Pre/post-tool-use hooks that write directly to Redis
@@ -76,7 +98,7 @@ $ npx token-nerd install-hooks
 
 ### Implementation Details
 ```
-# Hooks installed by 'npx token-nerd install-hooks'
+# Hooks installed automatically by postinstall script
 ~/.config/claude/hooks/pre-tool-use    # Symlink to token-nerd/src/hooks/pre-tool-use.ts
 ~/.config/claude/hooks/post-tool-use   # Symlink to token-nerd/src/hooks/post-tool-use.ts
 
@@ -134,18 +156,26 @@ $ npx token-nerd
 ```
 
 ### Success Criteria
-- [ ] Hooks fire on EVERY tool operation
-- [ ] Session ID correctly extracted from environment
-- [ ] Operations written to Redis (guaranteed running via MCP)
-- [ ] Both request (pre) and response (post) captured
-- [ ] Data automatically available when analyzer runs
+- [x] Hooks fire on EVERY tool operation ✅ **VERIFIED WORKING**
+- [x] Session ID correctly extracted from environment ✅ **VERIFIED WORKING**
+- [x] Operations written to Redis (guaranteed running via MCP) ✅ **VERIFIED WORKING**
+- [x] Both request (pre) and response (post) captured ✅ **VERIFIED WORKING**
+- [x] Data automatically available when analyzer runs ✅ **VERIFIED WORKING**
 
 ### Before Moving On
 User MUST verify hooks are capturing data by performing 2-3 operations and running the analyzer.
+✅ **COMPLETED** - Verified hooks capturing live operations to Redis
 
 ---
 
-## Step 2: Session Tracking System (2 hours)
+## Step 2: Session Tracking System (2 hours) ✅ **COMPLETED**
+
+**✅ COMPLETION STATUS (Aug 2025):**
+- ✅ Session discovery implemented (`src/lib/session-tracker.ts`)
+- ✅ JSONL file scanning and metadata extraction
+- ✅ Project name detection from transcript files
+- ✅ Session selection with inquirer integration
+- ✅ Active vs idle session detection
 
 ### What we build
 - Lightweight session discovery that only reads file metadata

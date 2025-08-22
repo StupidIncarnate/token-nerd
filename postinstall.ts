@@ -8,9 +8,9 @@ async function postInstall() {
   try {
     await installer.install();
   } catch (error) {
-    console.error('You may need to run the setup manually:');
-    console.error('   token-nerd install-mcp');
-    console.error('   token-nerd install-hooks');
+    console.error('Installation failed. Please check logs above for details.');
+    console.error('You may need to restart Claude Code and try again.');
+    console.error('If issues persist, check: https://github.com/anthropics/token-nerd/issues');
     process.exit(1);
   }
 }

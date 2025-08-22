@@ -1,6 +1,6 @@
 # Token Nerd
 
-Track and analyze actual token usage in Claude Code sessions. See exactly which operations consume tokens and optimize your workflows.
+**DUAL-COMPONENT SYSTEM**: Replace Claude's inaccurate statusline estimates with real token counts AND provide detailed drill-down analysis.
 
 ## The Problem
 
@@ -12,18 +12,18 @@ Claude Code's statusline shows inaccurate estimates (40-75k when actual is 130-1
 ## Quick Start
 
 ```bash
-# 1. Install MCP server and hooks (one-time setup)
-npx token-nerd install-mcp    # Adds Redis manager to ~/.claude.json
-npx token-nerd install-hooks  # Installs operation capture hooks
+# 1. Install globally (automatic setup)
+npm install -g token-nerd
 
 # 2. Restart Claude Code
-# MCP server starts Redis automatically
+# Everything is configured automatically
 
 # 3. Use Claude Code normally
-# All operations are captured to Redis
+# ✅ Statusline shows real token counts: 🐿️ 156,107 (100%)
+# ✅ All operations captured for analysis
 
 # 4. Analyze anytime:
-npx token-nerd  # View your token usage
+token-nerd  # Interactive analysis (coming soon)
 ```
 
 ## What You'll See
@@ -43,15 +43,26 @@ Session: ce03c353 | Total: 83,788 tokens | Sort: TOKENS
 Controls: [t]okens | [c]hronological | [Tab] expand | [Enter] view
 ```
 
+## Current Status
+
+**✅ COMPONENT 1: STATUSLINE INTEGRATION** 
+- Real-time accurate token counts in Claude's statusline
+- Shows format: `🐿️ 156,107 (100%)` with proper percentage warnings
+- Works immediately after installation
+
+**🚧 COMPONENT 2: ANALYSIS CLI**
+- ✅ Operation capture (hooks writing to Redis)
+- ✅ Session tracking and selection
+- ❌ Interactive TUI (coming soon)
+- ❌ Token correlation engine (coming soon)
+
 ## How It Works
 
-1. **MCP Server** starts when Claude Code starts, ensures Redis is running
-2. **Hooks** capture every tool operation and write to Redis
-3. **JSONL** provides total tokens per message
-4. **Correlation Engine** allocates tokens:
-   - Single operation = exact count
-   - Multiple operations = proportional by response size
-5. **Interactive TUI** lets you explore without restarting
+1. **Automatic Installation** - `npm install -g` sets up everything via postinstall script
+2. **MCP Server** - Starts with Claude Code, manages Redis lifecycle  
+3. **Hooks** - Capture every tool operation in `~/.claude/settings.json`
+4. **Statusline** - Shows real token counts from JSONL transcript parsing
+5. **Future: Interactive TUI** - Will correlate operations with token costs
 
 ## Implementation
 

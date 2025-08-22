@@ -85,7 +85,7 @@ correlation:<timestamp> = {
   - Press 'c' for chronological sort
   - Press Tab to expand/collapse bundles
   - Press Enter to view operation details
-- `npx token-nerd install-hooks`: One-time hook setup
+- ✅ **AUTOMATIC**: Hooks configured via postinstall script (no manual setup needed)
 
 ## Design Decisions
 
