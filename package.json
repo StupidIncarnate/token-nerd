@@ -1,0 +1,40 @@
+{
+  "name": "token-nerd",
+  "version": "0.1.0",
+  "description": "Comprehensive token monitoring and analysis tools for Claude Code sessions",
+  "main": "src/index.ts",
+  "bin": {
+    "token-nerd": "./src/cli/index.ts"
+  },
+  "scripts": {
+    "test": "jest",
+    "postinstall": "npx tsx postinstall.ts",
+    "preuninstall": "npx tsx preuninstall.ts"
+  },
+  "dependencies": {
+    "commander": "^9.0.0",
+    "ink": "^4.0.0",
+    "react": "^18.0.0",
+    "inquirer": "^9.0.0",
+    "redis": "^4.0.0",
+    "tsx": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/react": "^18.2.0",
+    "typescript": "^5.2.0",
+    "tsx": "^4.0.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.0",
+    "ts-jest": "^29.1.0"
+  },
+  "keywords": [
+    "claude",
+    "tokens",
+    "monitoring",
+    "analysis",
+    "claude-code"
+  ],
+  "author": "",
+  "license": "MIT"
+}

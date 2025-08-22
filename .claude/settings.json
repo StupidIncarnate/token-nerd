@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": []
+  },
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(chmod:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(npm install:*)",
+      "Bash(npm test)",
+      "Bash(rm:*)",
+      "Bash(node:*)",
+      "Bash(npm test:*)",
+      "Bash(ls *)",
+      "Write",
+      "Bash(find:*)",
+      "Bash(npm run:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(ls:*)",
+      "Bash(done)",
+      "Bash(tree:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(exit 0)",
+      "Bash(true)",
+      "Bash(env)",
+      "Bash(claude config*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx ts-node:*)",
+      "Bash(npx eslint:*)",
+      "Bash(cat:*)",
+      "WebFetch(domain:docs.anthropic.com)"
+    ],
+    "deny": []
+  }
+}
