@@ -152,7 +152,6 @@ dump.rdb
 # Build outputs
 build/
 dist/
-lib/
 out/
 
 # Test outputs
