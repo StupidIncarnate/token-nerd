@@ -11,7 +11,7 @@ interface TerminalState {
   sortAscending: boolean;
   selectedIndex: number;
   expanded: Set<string>;
-  viewingDetails: Operation | null;
+  viewingDetails: Bundle | null;
   detailScrollOffset: number;
 }
 
@@ -201,40 +201,58 @@ class TokenAnalyzer {
   }
 
   private renderDetails(): void {
-    const details = this.state.viewingDetails!;
+    const bundle = this.state.viewingDetails!;
     
     this.clearScreen();
     
     console.log(`┌${'─'.repeat(78)}┐`);
-    console.log(`│ OPERATION DETAILS`);
+    console.log(`│ BUNDLE DETAILS - ${bundle.operations.length} Operations`);
     console.log(`└${'─'.repeat(78)}┘\n`);
     
-    console.log(`Tool: ${details.tool}`);
-    console.log(`Tokens: ${details.tokens.toLocaleString()} (${details.allocation})`);
-    console.log(`Time: ${new Date(details.timestamp).toLocaleTimeString()}`);
-    console.log(`Response Size: ${details.responseSize.toLocaleString()} chars`);
-    console.log('');
-    console.log('Request Parameters:');
-    console.log(JSON.stringify(details.params, null, 2));
+    console.log(`Bundle ID: ${bundle.id}`);
+    console.log(`Total Tokens: ${bundle.totalTokens.toLocaleString()}`);
+    console.log(`Time: ${new Date(bundle.timestamp).toLocaleTimeString()}`);
     console.log('');
     
-    const responseContent = typeof details.response === 'string' 
-      ? details.response 
-      : JSON.stringify(details.response, null, 2);
+    // Build combined content with headers
+    const allLines: string[] = [];
     
-    const responseLines = responseContent.split('\n');
+    bundle.operations.forEach((operation, index) => {
+      allLines.push(`┌─ OPERATION ${index + 1}: ${operation.tool} ─${'─'.repeat(Math.max(1, 50 - operation.tool.length))}`);
+      allLines.push(`│ Tokens: ${operation.tokens.toLocaleString()} (${operation.allocation})`);
+      allLines.push(`│ Response Size: ${operation.responseSize.toLocaleString()} chars`);
+      allLines.push(`│ Sequence: ${operation.sequence || 'N/A'}`);
+      allLines.push(`│ Message ID: ${operation.message_id || 'N/A'}`);
+      
+      if (operation.tool !== 'Assistant') {
+        allLines.push(`│ Request Parameters:`);
+        const paramsStr = JSON.stringify(operation.params, null, 2);
+        paramsStr.split('\n').forEach(line => allLines.push(`│   ${line}`));
+        allLines.push(`│`);
+      }
+      
+      allLines.push(`│ Response:`);
+      const responseContent = typeof operation.response === 'string' 
+        ? operation.response 
+        : JSON.stringify(operation.response, null, 2);
+      
+      responseContent.split('\n').forEach(line => allLines.push(`│   ${line}`));
+      
+      allLines.push(`└${'─'.repeat(78)}`);
+      allLines.push('');
+    });
     
-    // Ensure scroll offset is within bounds
-    const maxOffset = Math.max(0, responseLines.length - 15);
+    // Handle scrolling
+    const maxOffset = Math.max(0, allLines.length - 20);
     this.state.detailScrollOffset = Math.min(this.state.detailScrollOffset, maxOffset);
     this.state.detailScrollOffset = Math.max(0, this.state.detailScrollOffset);
     
-    const visibleLines = responseLines.slice(
+    const visibleLines = allLines.slice(
       this.state.detailScrollOffset, 
-      this.state.detailScrollOffset + 15
+      this.state.detailScrollOffset + 20
     );
     
-    console.log(`Response (lines ${this.state.detailScrollOffset + 1}-${Math.min(this.state.detailScrollOffset + 15, responseLines.length)} of ${responseLines.length}):`);
+    console.log(`Content (lines ${this.state.detailScrollOffset + 1}-${Math.min(this.state.detailScrollOffset + 20, allLines.length)} of ${allLines.length}):`);
     visibleLines.forEach(line => console.log(line));
     
     console.log('\n' + '─'.repeat(80));
@@ -305,11 +323,8 @@ class TokenAnalyzer {
       case '\r': // Enter
         if (flatItems.length > 0) {
           const item = flatItems[this.state.selectedIndex];
-          const operation = item.operation || (item.bundle.operations.length === 1 ? item.bundle.operations[0] : null);
-          if (operation) {
-            this.state.viewingDetails = operation;
-            this.state.detailScrollOffset = 0;
-          }
+          this.state.viewingDetails = item.bundle;
+          this.state.detailScrollOffset = 0;
         }
         break;
       case '\u001b[A': // Up arrow
@@ -345,6 +360,7 @@ class TokenAnalyzer {
       process.stdin.once('data', () => resolve());
     });
   }
+
 
   private cleanup(): void {
     if (process.stdin.isTTY) {

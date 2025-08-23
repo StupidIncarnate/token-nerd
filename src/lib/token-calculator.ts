@@ -72,3 +72,11 @@ export async function getTokenCount(transcriptPath: string): Promise<number> {
 
   return highestTotal;
 }
+
+/**
+ * Rough estimation of tokens from content string
+ * Using simple heuristic: ~4 chars per token (Claude's approximation)
+ */
+export function estimateTokensFromContent(content: string): number {
+  return Math.ceil(content.length / 4);
+}

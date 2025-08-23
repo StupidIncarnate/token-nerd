@@ -2,6 +2,8 @@ import { createClient } from 'redis';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { parseJsonl, JsonlMessage } from './jsonl-utils';
+import { estimateTokensFromContent } from './token-calculator';
 
 export interface Operation {
   tool: string;
@@ -11,6 +13,7 @@ export interface Operation {
   timestamp: number;
   session_id: string;
   message_id?: string;
+  sequence?: number;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -30,17 +33,6 @@ export interface Bundle {
   totalTokens: number;
 }
 
-export interface JsonlMessage {
-  id: string;
-  timestamp: number;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
-  content?: any;
-}
 
 let redisClient: any = null;
 
@@ -68,7 +60,7 @@ async function getRedisClient() {
   return redisClient;
 }
 
-async function getHookOperations(sessionId: string): Promise<Operation[]> {
+export async function getHookOperations(sessionId: string): Promise<Operation[]> {
   const redis = await getRedisClient();
   if (!redis) return [];
 
@@ -86,8 +78,8 @@ async function getHookOperations(sessionId: string): Promise<Operation[]> {
       responseKeys = allResponseKeys;
     }
     
-    // Create a map of timestamp -> operations
-    const operationMap = new Map<string, Partial<Operation>>();
+    // Create a map of sequence -> operations
+    const operationMap = new Map<number, Partial<Operation>>();
     
     // Process request data
     for (const key of requestKeys) {
@@ -95,12 +87,15 @@ async function getHookOperations(sessionId: string): Promise<Operation[]> {
       const data = await redis.get(key);
       if (data) {
         const parsed = JSON.parse(data);
-        operationMap.set(timestamp, {
-          tool: parsed.tool,
-          params: parsed.params,
-          timestamp: parseInt(timestamp),
-          session_id: parsed.session_id
-        });
+        if (parsed.sequence !== undefined) {
+          operationMap.set(parsed.sequence, {
+            tool: parsed.tool,
+            params: parsed.params,
+            timestamp: parseInt(timestamp),
+            session_id: parsed.session_id,
+            sequence: parsed.sequence
+          });
+        }
       }
     }
     
@@ -110,33 +105,37 @@ async function getHookOperations(sessionId: string): Promise<Operation[]> {
       const data = await redis.get(key);
       if (data) {
         const parsed = JSON.parse(data);
-        const existing = operationMap.get(timestamp) || {};
-        
-        let response = parsed.response;
-        // Handle file references
-        if (typeof response === 'string' && response.startsWith('file://')) {
-          const filePath = response.replace('file://', '');
-          try {
-            const fileContent = fs.readFileSync(filePath, 'utf8');
-            response = JSON.parse(fileContent);
-          } catch (error) {
-            response = `[Large response stored in ${filePath}]`;
+        if (parsed.sequence !== undefined) {
+          const existing = operationMap.get(parsed.sequence) || {};
+          
+          let response = parsed.response;
+          // Handle file references
+          if (typeof response === 'string' && response.startsWith('file://')) {
+            const filePath = response.replace('file://', '');
+            try {
+              const fileContent = fs.readFileSync(filePath, 'utf8');
+              response = JSON.parse(fileContent);
+            } catch (error) {
+              response = `[Large response stored in ${filePath}]`;
+            }
           }
+          
+          operationMap.set(parsed.sequence, {
+            ...existing,
+            response,
+            responseSize: parsed.responseSize,
+            message_id: parsed.message_id,
+            usage: parsed.usage,
+            sequence: parsed.sequence,
+            timestamp: existing.timestamp || parseInt(timestamp)
+          });
         }
-        
-        operationMap.set(timestamp, {
-          ...existing,
-          response,
-          responseSize: parsed.responseSize,
-          message_id: parsed.message_id,
-          usage: parsed.usage
-        });
       }
     }
     
     // Convert to full operations
     const operations: Operation[] = [];
-    for (const [timestamp, op] of operationMap.entries()) {
+    for (const [sequence, op] of operationMap.entries()) {
       if (op.tool && op.timestamp) {
         operations.push({
           tool: op.tool,
@@ -146,6 +145,7 @@ async function getHookOperations(sessionId: string): Promise<Operation[]> {
           timestamp: op.timestamp,
           session_id: op.session_id || sessionId,
           message_id: op.message_id,
+          sequence: op.sequence,
           usage: op.usage,
           tokens: 0, // Will be filled by correlation
           allocation: 'estimated',
@@ -181,40 +181,6 @@ function formatOperationDetails(tool: string, params: any): string {
   }
 }
 
-function parseJsonl(filePath: string): JsonlMessage[] {
-  try {
-    const expandedPath = filePath.replace('~', os.homedir());
-    if (!fs.existsSync(expandedPath)) {
-      return [];
-    }
-    
-    const content = fs.readFileSync(expandedPath, 'utf8');
-    const lines = content.trim().split('\n').filter(line => line.trim());
-    
-    return lines
-      .map(line => {
-        try {
-          const parsed = JSON.parse(line);
-          // Extract usage data - could be at root level or inside message object
-          const usage = parsed.usage || parsed.message?.usage;
-          const messageId = parsed.message?.id || parsed.id || parsed.uuid;
-          
-          return {
-            id: messageId,
-            timestamp: new Date(parsed.timestamp || 0).getTime(),
-            usage: usage,
-            content: parsed
-          } as JsonlMessage;
-        } catch (error) {
-          return null;
-        }
-      })
-      .filter((msg): msg is JsonlMessage => msg !== null);
-  } catch (error) {
-    console.warn('Error parsing JSONL:', error);
-    return [];
-  }
-}
 
 export async function correlateOperations(sessionId: string, jsonlPath?: string): Promise<Bundle[]> {
   // Get messages from JSONL (primary data source)
@@ -243,13 +209,25 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
   
   const bundles: Bundle[] = [];
   
-  // Process each assistant message
-  for (const message of assistantMessages) {
-    // Only count output tokens - cache creation is context loading, not operation cost
-    const messageTokens = (message.usage?.output_tokens || 0);
+  // Process each assistant message with delta calculation
+  let previousTotalTokens = 0;
+  
+  for (let i = 0; i < assistantMessages.length; i++) {
+    const message = assistantMessages[i];
     
-    // Find all operations that match this message ID
-    const matchingOperations = operations.filter(op => op.message_id === message.id);
+    // Calculate total tokens for this message
+    const currentTotalTokens = (message.usage?.input_tokens || 0) + 
+                               (message.usage?.output_tokens || 0) + 
+                               (message.usage?.cache_creation_input_tokens || 0) + 
+                               (message.usage?.cache_read_input_tokens || 0);
+    
+    // Delta tokens = incremental cost since last message
+    const messageTokens = currentTotalTokens - previousTotalTokens;
+    previousTotalTokens = currentTotalTokens;
+    
+    // Find all operations that match this JSONL position by sequence number (i+1 = 1-based)
+    const sequenceNumber = i + 1;
+    const matchingOperations = operations.filter(op => op.sequence === sequenceNumber);
     
     if (matchingOperations.length === 0) {
       // No hook operations found - create synthetic operation for text-only message
@@ -274,17 +252,44 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         totalTokens: messageTokens
       });
     } else if (matchingOperations.length === 1) {
-      // Single tool call - exact token allocation
+      // Single tool call + message content - proportional allocation
+      const messageOperation: Operation = {
+        tool: 'Assistant',
+        params: {},
+        response: message.content,
+        responseSize: JSON.stringify(message.content).length,
+        timestamp: message.timestamp,
+        session_id: sessionId,
+        message_id: message.id,
+        usage: message.usage,
+        tokens: 0, // Will be calculated below
+        allocation: 'proportional',
+        details: 'message'
+      };
+      
+      // Calculate token allocation using token calculator
+      const redisResponseContent = typeof matchingOperations[0].response === 'string' 
+        ? matchingOperations[0].response 
+        : JSON.stringify(matchingOperations[0].response);
+      const messageResponseContent = typeof messageOperation.response === 'string'
+        ? messageOperation.response
+        : JSON.stringify(messageOperation.response);
+        
+      const redisTokens = estimateTokensFromContent(redisResponseContent);
+      const messageTokensAlloc = estimateTokensFromContent(messageResponseContent);
+      
       const operation = {
         ...matchingOperations[0],
-        tokens: messageTokens,
-        allocation: 'exact' as const
+        tokens: redisTokens,
+        allocation: 'proportional' as const
       };
+      
+      messageOperation.tokens = messageTokensAlloc;
       
       bundles.push({
         id: message.id,
         timestamp: message.timestamp,
-        operations: [operation],
+        operations: [operation, messageOperation],
         totalTokens: messageTokens
       });
     } else {
@@ -299,6 +304,23 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
           allocation: 'proportional' as const
         };
       });
+      
+      // Also add JSONL message content
+      const messageOperation = {
+        tool: 'Assistant',
+        params: {},
+        response: message.content,
+        responseSize: JSON.stringify(message.content).length,
+        timestamp: message.timestamp,
+        session_id: sessionId,
+        message_id: message.id,
+        usage: message.usage,
+        tokens: 0, // No additional tokens for message content
+        allocation: 'proportional' as const,
+        details: 'message'
+      };
+      
+      bundledOperations.push(messageOperation);
       
       bundles.push({
         id: message.id,

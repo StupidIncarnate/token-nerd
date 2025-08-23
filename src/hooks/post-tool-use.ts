@@ -4,6 +4,7 @@ import { createClient } from 'redis';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { getAssistantMessageCount } from '../lib/jsonl-utils';
 
 let redisClient: any = null;
 
@@ -51,6 +52,9 @@ async function processRedisOperations(input: string) {
     const { size: responseSize, serialized } = calculateResponseSize(tool_response);
     const redis = await getRedisClient();
     
+    // Get sequence number from JSONL
+    const sequence = getAssistantMessageCount(session_id);
+    
     const key = `session:${session_id}:operations:${timestamp}:response`;
     let value: any = {
       tool: tool_name,
@@ -59,7 +63,8 @@ async function processRedisOperations(input: string) {
       timestamp,
       session_id,
       message_id,
-      usage
+      usage,
+      sequence
     };
     
     if (responseSize > 10000) {

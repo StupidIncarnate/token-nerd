@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 
 import { createClient } from 'redis';
+import { getAssistantMessageCount } from '../lib/jsonl-utils';
 
 let redisClient: any = null;
 
@@ -35,12 +36,16 @@ async function processRedisOperations(input: string) {
     
     const redis = await getRedisClient();
     
+    // Get sequence number from JSONL
+    const sequence = getAssistantMessageCount(session_id);
+    
     const key = `session:${session_id}:operations:${timestamp}:request`;
     const value = {
       tool: tool_name,
       params: tool_input,
       timestamp,
-      session_id
+      session_id,
+      sequence
     };
     
     const pipeline = redis.multi();
