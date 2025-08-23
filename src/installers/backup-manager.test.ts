@@ -4,14 +4,28 @@ import { BackupManager } from './backup-manager';
 import { BackupMetadata, InstallationState } from './types';
 import { TEST_TEMP_DIR, TEST_CLAUDE_DIR } from '../test-setup';
 
+// Mock console methods to prevent test output clutter
+const mockConsoleLog = jest.fn();
+const mockConsoleWarn = jest.fn();
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+
 describe('BackupManager', () => {
   let backupManager: BackupManager;
   let testFile: string;
 
   beforeEach(() => {
+    jest.clearAllMocks();
+    console.log = mockConsoleLog;
+    console.warn = mockConsoleWarn;
     backupManager = new BackupManager();
     testFile = path.join(TEST_TEMP_DIR, 'test-file.txt');
     fs.writeFileSync(testFile, 'original content');
+  });
+
+  afterEach(() => {
+    console.log = originalConsoleLog;
+    console.warn = originalConsoleWarn;
   });
 
   describe('createBackup', () => {
@@ -24,6 +38,7 @@ describe('BackupManager', () => {
       expect(fs.readFileSync(metadata!.backupPath, 'utf-8')).toBe('original content');
       expect(metadata!.component).toBe('test-component');
       expect(metadata!.operation).toBe('install');
+      expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining('✓ Backed up'));
     });
 
     it('should return null for non-existent file', async () => {
@@ -54,6 +69,7 @@ describe('BackupManager', () => {
       // Restore from backup
       await backupManager.restoreBackup(metadata!);
       expect(fs.readFileSync(testFile, 'utf-8')).toBe('original content');
+      expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining('✓ Restored'));
     });
 
     it('should throw error if backup file does not exist', async () => {

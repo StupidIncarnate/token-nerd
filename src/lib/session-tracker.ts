@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import inquirer from 'inquirer';
+import { getTokenCount } from './token-calculator';
 
 interface Session {
   id: string;
@@ -70,8 +71,8 @@ export async function listSessions(): Promise<Session[]> {
         project = 'home'; // Keep simple for home directory
       }
       
-      // Rough token estimate from file size
-      let tokens = Math.round(stats.size / 100);
+      // Get accurate token count from JSONL (same method as statusline)
+      let tokens = await getTokenCount(filePath);
       
       sessions.push({
         id: sessionId,
@@ -87,3 +88,4 @@ export async function listSessions(): Promise<Session[]> {
   // Sort by last modified, most recent first
   return sessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
 }
+

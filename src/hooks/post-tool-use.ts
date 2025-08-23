@@ -96,13 +96,12 @@ async function main() {
     input += chunk;
   });
 
-  process.stdin.on('end', () => {
+  process.stdin.on('end', async () => {
     console.log(input);
     
-    // Fire and forget Redis operations
-    processRedisOperations(input);
+    // Wait for Redis operations to complete
+    await processRedisOperations(input);
     
-    // Exit immediately
     process.exit(0);
   });
 }

@@ -5,6 +5,9 @@ import { getRealTokenCount } from '../statusline/get-real-tokens';
 import { formatTokenCount } from '../statusline/config';
 import { selectSession, listSessions } from '../lib/session-tracker';
 import { selectSessionWithTreeView } from '../lib/session-tree-view';
+import { launchTUI } from '../lib/tui-components';
+import * as path from 'path';
+import * as os from 'os';
 
 program
   .name('token-nerd')
@@ -45,7 +48,19 @@ program
     const selectedSessionId = await selectSessionWithTreeView();
     if (selectedSessionId) {
       console.log(`\n🔍 Analyzing session ${selectedSessionId}...`);
-      console.log('📊 TUI coming in step 3...');
+      const jsonlPath = path.join(os.homedir(), '.claude', 'projects', '*', `${selectedSessionId}.jsonl`);
+      
+      // Find the actual JSONL file path
+      const { execSync } = require('child_process');
+      let actualJsonlPath: string | undefined;
+      try {
+        const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${selectedSessionId}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
+        actualJsonlPath = result.trim() || undefined;
+      } catch (error) {
+        actualJsonlPath = undefined;
+      }
+      
+      await launchTUI(selectedSessionId, actualJsonlPath);
     }
   });
 
@@ -88,8 +103,19 @@ program
     
     // Session listing/selection mode
     if (options.session) {
-      console.log(`Analyzing session ${options.session}...`);
-      console.log('TUI coming soon...');
+      console.log(`🔍 Analyzing session ${options.session}...`);
+      
+      // Find the actual JSONL file path
+      const { execSync } = require('child_process');
+      let actualJsonlPath: string | undefined;
+      try {
+        const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${options.session}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
+        actualJsonlPath = result.trim() || undefined;
+      } catch (error) {
+        actualJsonlPath = undefined;
+      }
+      
+      await launchTUI(options.session, actualJsonlPath);
     } else {
       // No session specified - will be handled by default behavior below
       return;
@@ -107,7 +133,19 @@ if (!process.argv.slice(2).length) {
     const selectedSessionId = await selectSessionWithTreeView();
     if (selectedSessionId) {
       console.log(`\n🔍 Analyzing session ${selectedSessionId}...`);
-      console.log('📊 TUI coming in step 3...');
+      const jsonlPath = path.join(os.homedir(), '.claude', 'projects', '*', `${selectedSessionId}.jsonl`);
+      
+      // Find the actual JSONL file path
+      const { execSync } = require('child_process');
+      let actualJsonlPath: string | undefined;
+      try {
+        const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${selectedSessionId}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
+        actualJsonlPath = result.trim() || undefined;
+      } catch (error) {
+        actualJsonlPath = undefined;
+      }
+      
+      await launchTUI(selectedSessionId, actualJsonlPath);
     }
   })();
 }

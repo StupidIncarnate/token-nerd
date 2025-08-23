@@ -17,11 +17,13 @@
     "jsx": "react-jsx"
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "src/**/*.tsx"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "**/*.test.tsx"
   ]
 }

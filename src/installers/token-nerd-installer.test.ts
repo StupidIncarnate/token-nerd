@@ -3,20 +3,35 @@ import * as path from 'path';
 import { TokenNerdInstaller } from './token-nerd-installer';
 import { TEST_TEMP_DIR, createMockFiles } from '../test-setup';
 
+// Mock console methods to prevent test output clutter
+const mockConsoleLog = jest.fn();
+const mockConsoleWarn = jest.fn();
+const mockConsoleError = jest.fn();
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+const originalConsoleError = console.error;
+
 // Mock process.cwd to return test directory
 const originalCwd = process.cwd;
 beforeAll(() => {
   process.cwd = jest.fn().mockReturnValue(TEST_TEMP_DIR);
+  console.log = mockConsoleLog;
+  console.warn = mockConsoleWarn;
+  console.error = mockConsoleError;
 });
 
 afterAll(() => {
   process.cwd = originalCwd;
+  console.log = originalConsoleLog;
+  console.warn = originalConsoleWarn;
+  console.error = originalConsoleError;
 });
 
 describe('TokenNerdInstaller', () => {
   let installer: TokenNerdInstaller;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     // Create mock files after test-setup cleanup
     createMockFiles();
     installer = new TokenNerdInstaller();

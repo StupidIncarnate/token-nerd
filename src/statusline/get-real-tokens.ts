@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as readline from 'readline';
 import { calculateTokenStatus } from './config.js';
+import { getTokenCount } from '../lib/token-calculator';
 
 interface TokenUsage {
   input_tokens?: number;
@@ -34,59 +35,53 @@ interface TokenResult {
 }
 
 export async function getRealTokenCount(transcriptPath: string): Promise<TokenResult> {
-  if (!fs.existsSync(transcriptPath)) {
+  const total = await getTokenCount(transcriptPath);
+  
+  if (total === 0) {
     return { total: 0, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, percentage: 0 };
   }
 
+  // Get detailed breakdown from last message for statusline details
   let lastMessageWithUsage: TokenUsage | null = null;
-  let highestTotal = 0;
 
-  const fileStream = fs.createReadStream(transcriptPath);
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity
-  });
+  if (fs.existsSync(transcriptPath)) {
+    const fileStream = fs.createReadStream(transcriptPath);
+    const rl = readline.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
 
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    
-    try {
-      const msg: TranscriptMessage = JSON.parse(line);
+    for await (const line of rl) {
+      if (!line.trim()) continue;
       
-      // Check both .usage and .message.usage (different message formats)
-      const usage = msg.usage || msg.message?.usage;
-      
-      if (usage) {
-        // Calculate total for this message
-        const messageTotal = (usage.input_tokens || 0) + 
-                            (usage.output_tokens || 0) + 
-                            (usage.cache_read_input_tokens || 0) + 
-                            (usage.cache_creation_input_tokens || 0);
+      try {
+        const msg: TranscriptMessage = JSON.parse(line);
+        const usage = msg.usage || msg.message?.usage;
         
-        // Track the highest total we've seen (tokens accumulate)
-        if (messageTotal > highestTotal) {
-          highestTotal = messageTotal;
-          lastMessageWithUsage = usage;
+        if (usage) {
+          const messageTotal = (usage.input_tokens || 0) + 
+                              (usage.output_tokens || 0) + 
+                              (usage.cache_read_input_tokens || 0) + 
+                              (usage.cache_creation_input_tokens || 0);
+          
+          if (messageTotal === total) {
+            lastMessageWithUsage = usage;
+          }
         }
+      } catch (e) {
+        // Skip malformed lines
       }
-    } catch (e) {
-      // Skip malformed lines
     }
   }
 
-  if (!lastMessageWithUsage) {
-    return { total: 0, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, percentage: 0 };
-  }
-
-  const total = highestTotal;
   const status = calculateTokenStatus(total);
 
   return {
     total,
-    input: lastMessageWithUsage.input_tokens || 0,
-    output: lastMessageWithUsage.output_tokens || 0,
-    cacheRead: lastMessageWithUsage.cache_read_input_tokens || 0,
-    cacheCreation: lastMessageWithUsage.cache_creation_input_tokens || 0,
+    input: lastMessageWithUsage?.input_tokens || 0,
+    output: lastMessageWithUsage?.output_tokens || 0,
+    cacheRead: lastMessageWithUsage?.cache_read_input_tokens || 0,
+    cacheCreation: lastMessageWithUsage?.cache_creation_input_tokens || 0,
     percentage: status.percentage
   };
 }

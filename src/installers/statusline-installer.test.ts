@@ -4,11 +4,28 @@ import { StatuslineInstaller } from './statusline-installer';
 import { TEST_TEMP_DIR, TEST_CLAUDE_DIR } from '../test-setup';
 import { TOKEN_NERD_VAR, TOKEN_NERD_COMMAND_PATTERN } from '../shared-constants';
 
+// Mock console methods to prevent test output clutter
+const mockConsoleLog = jest.fn();
+const mockConsoleWarn = jest.fn();
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+
+beforeAll(() => {
+  console.log = mockConsoleLog;
+  console.warn = mockConsoleWarn;
+});
+
+afterAll(() => {
+  console.log = originalConsoleLog;
+  console.warn = originalConsoleWarn;
+});
+
 describe('StatuslineInstaller', () => {
   let installer: StatuslineInstaller;
   let settingsPath: string;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     installer = new StatuslineInstaller();
     settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
   });

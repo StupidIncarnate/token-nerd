@@ -3,14 +3,24 @@ import * as path from 'path';
 import { McpInstaller } from './mcp-installer';
 import { TEST_TEMP_DIR, createMockFiles } from '../test-setup';
 
+// Mock console methods to prevent test output clutter
+const mockConsoleLog = jest.fn();
+const mockConsoleWarn = jest.fn();
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+
 // Mock process.cwd to return test directory
 const originalCwd = process.cwd;
 beforeAll(() => {
   process.cwd = jest.fn().mockReturnValue(TEST_TEMP_DIR);
+  console.log = mockConsoleLog;
+  console.warn = mockConsoleWarn;
 });
 
 afterAll(() => {
   process.cwd = originalCwd;
+  console.log = originalConsoleLog;
+  console.warn = originalConsoleWarn;
 });
 
 describe('McpInstaller', () => {
@@ -19,6 +29,7 @@ describe('McpInstaller', () => {
   let mcpServerPath: string;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     createMockFiles();
     installer = new McpInstaller();
     claudeConfigPath = path.join(TEST_TEMP_DIR, '.claude.json');

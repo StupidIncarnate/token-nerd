@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import inquirer from 'inquirer';
+import { getTokenCount } from './token-calculator';
 
 interface Session {
   id: string;
@@ -113,8 +114,8 @@ export class SessionTreeView {
         project = cleanDir.split('-').pop() || 'unknown';
       }
       
-      // Rough token estimate from file size
-      const tokens = Math.round(stats.size / 100);
+      // Get accurate token count from JSONL (same method as statusline)
+      const tokens = await getTokenCount(filePath);
       
       sessions.push({
         id: sessionId,

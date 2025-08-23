@@ -3,14 +3,24 @@ import * as path from 'path';
 import { HooksInstaller } from './hooks-installer';
 import { TEST_TEMP_DIR, TEST_HOOKS_DIR, TEST_CLAUDE_DIR, createMockFiles } from '../test-setup';
 
+// Mock console methods to prevent test output clutter
+const mockConsoleLog = jest.fn();
+const mockConsoleWarn = jest.fn();
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+
 // Mock process.cwd to return test directory
 const originalCwd = process.cwd;
 beforeAll(() => {
   process.cwd = jest.fn().mockReturnValue(TEST_TEMP_DIR);
+  console.log = mockConsoleLog;
+  console.warn = mockConsoleWarn;
 });
 
 afterAll(() => {
   process.cwd = originalCwd;
+  console.log = originalConsoleLog;
+  console.warn = originalConsoleWarn;
 });
 
 describe('HooksInstaller', () => {
@@ -18,6 +28,7 @@ describe('HooksInstaller', () => {
   let sourceDir: string;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     createMockFiles();
     installer = new HooksInstaller();
     sourceDir = path.join(TEST_TEMP_DIR, 'src', 'hooks');

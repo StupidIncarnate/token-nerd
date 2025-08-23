@@ -39,8 +39,8 @@ async function startRedis(): Promise<void> {
   redisProcess = spawn('redis-server', [
     '--port', '6379',
     '--daemonize', 'no',
-    '--save', '',  // Don't save to disk
-    '--appendonly', 'no'  // Don't use AOF
+    '--save', '60', '1',  // Save if at least 1 change in 60 seconds
+    '--appendonly', 'yes'  // Enable AOF for durability
   ], {
     stdio: 'ignore',
     detached: false

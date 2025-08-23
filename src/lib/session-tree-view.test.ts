@@ -2,6 +2,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SessionTreeView, selectSessionWithTreeView } from './session-tree-view';
 
+// Mock console methods to prevent test output clutter
+const mockConsoleError = jest.fn();
+const originalConsoleError = console.error;
+
+beforeAll(() => {
+  console.error = mockConsoleError;
+});
+
+afterAll(() => {
+  console.error = originalConsoleError;
+});
+
+// Mock token calculator
+jest.mock('./token-calculator', () => ({
+  getTokenCount: jest.fn().mockResolvedValue(100)
+}));
+
 // Mock fs module
 jest.mock('fs', () => ({
   existsSync: jest.fn(),
@@ -30,10 +47,12 @@ jest.mock('inquirer', () => ({
 }));
 
 import inquirer from 'inquirer';
+import { getTokenCount } from './token-calculator';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockPath = path as jest.Mocked<typeof path>;
 const mockInquirer = inquirer as jest.Mocked<typeof inquirer>;
+const mockGetTokenCount = getTokenCount as jest.MockedFunction<typeof getTokenCount>;
 
 describe('SessionTreeView', () => {
   let treeView: SessionTreeView;
@@ -42,6 +61,9 @@ describe('SessionTreeView', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    
+    // Setup default mock for getTokenCount
+    mockGetTokenCount.mockResolvedValue(100);
     
     // Setup mock implementations
     mockHomedir.mockReturnValue(mockHomeDir);
@@ -185,7 +207,8 @@ describe('SessionTreeView', () => {
 
   describe('session loading', () => {
     it('should load sessions with correct properties', async () => {
-      mockFs.existsSync.mockReturnValue(true);
+      // First call to existsSync is for the main directory
+      mockFs.existsSync.mockReturnValueOnce(true);
       const mockDirents = [
         { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true }
       ];
@@ -195,10 +218,17 @@ describe('SessionTreeView', () => {
       const now = new Date();
       const recentTime = new Date(now.getTime() - 2 * 60 * 1000); // 2 minutes ago
       
-      mockFs.statSync.mockReturnValueOnce({
+      // Mock statSync for the session file
+      mockFs.statSync.mockReturnValue({
         mtime: recentTime,
         size: 15000
       } as any);
+      
+      // Subsequent calls to existsSync (for token calculator) return false
+      mockFs.existsSync.mockReturnValue(false);
+      
+      // Override getTokenCount to return 0 for non-existent files
+      mockGetTokenCount.mockResolvedValue(0);
       
       await treeView.initialize();
       
@@ -207,7 +237,7 @@ describe('SessionTreeView', () => {
       expect(sessions[0]).toMatchObject({
         id: 'session1',
         project: 'token-nerd',
-        tokens: 150, // 15000 / 100
+        tokens: 0, // Token calculator returns 0 for non-existent files
         isActive: true,
         path: expect.stringContaining('session1.jsonl')
       });
@@ -237,7 +267,8 @@ describe('SessionTreeView', () => {
     });
 
     it('should mark sessions as active if modified within 5 minutes', async () => {
-      mockFs.existsSync.mockReturnValue(true);
+      // First existsSync call for directory
+      mockFs.existsSync.mockReturnValueOnce(true);
       const mockDirents = [
         { name: '-home-brutus-home-projects-test', isDirectory: () => true }
       ];
@@ -251,6 +282,9 @@ describe('SessionTreeView', () => {
       mockFs.statSync
         .mockReturnValueOnce({ mtime: recentTime, size: 10000 } as any)
         .mockReturnValueOnce({ mtime: oldTime, size: 10000 } as any);
+        
+      // Token calculator existsSync calls return false
+      mockFs.existsSync.mockReturnValue(false);
       
       await treeView.initialize();
       
@@ -260,7 +294,8 @@ describe('SessionTreeView', () => {
     });
 
     it('should sort sessions by last modified time, most recent first', async () => {
-      mockFs.existsSync.mockReturnValue(true);
+      // First existsSync for directory
+      mockFs.existsSync.mockReturnValueOnce(true);
       const mockDirents = [
         { name: '-home-brutus-home-projects-test', isDirectory: () => true }
       ];
@@ -275,6 +310,9 @@ describe('SessionTreeView', () => {
         .mockReturnValueOnce({ mtime: oldTime, size: 10000 } as any)
         .mockReturnValueOnce({ mtime: newTime, size: 10000 } as any)
         .mockReturnValueOnce({ mtime: middleTime, size: 10000 } as any);
+        
+      // Token calculator existsSync calls return false
+      mockFs.existsSync.mockReturnValue(false);
       
       await treeView.initialize();
       
