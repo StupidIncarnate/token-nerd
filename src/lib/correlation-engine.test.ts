@@ -40,6 +40,11 @@ jest.mock('fs', () => ({
   mkdirSync: jest.fn()
 }));
 
+// Mock stats-collector to avoid startup context in tests
+jest.mock('./stats-collector', () => ({
+  getSnapshotForSession: jest.fn(() => Promise.resolve(null))
+}));
+
 const mockedRedis = jest.mocked(createClient);
 const mockedFs = jest.mocked(fs);
 
@@ -146,7 +151,8 @@ describe('correlation-engine', () => {
               tool: 'Edit',
               params: { file_path: '/test/file.ts', old_string: 'old', new_string: 'new' },
               timestamp: mockTimestamp,
-              session_id: sessionId
+              session_id: sessionId,
+              sequence: 1
             }));
           }
           if (key.includes(':response')) {
@@ -154,7 +160,8 @@ describe('correlation-engine', () => {
               tool: 'Edit',
               response: { success: true },
               responseSize: 20,
-              message_id: messageId
+              message_id: messageId,
+              sequence: 1
             }));
           }
           return Promise.resolve(null);

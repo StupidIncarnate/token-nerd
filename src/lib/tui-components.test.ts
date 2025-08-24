@@ -28,6 +28,7 @@ const mockedCorrelateOperations = jest.mocked(correlateOperations);
 describe('tui-components', () => {
   let consoleSpy: jest.SpyInstance;
   let processExitSpy: jest.SpyInstance;
+  const originalExit = process.exit;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -35,8 +36,10 @@ describe('tui-components', () => {
     jest.spyOn(console, 'clear').mockImplementation();
     jest.spyOn(console, 'error').mockImplementation();
     jest.spyOn(process.stdout, 'write').mockImplementation();
+    
+    // Mock process.exit more robustly
     processExitSpy = jest.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error('process.exit called');
+      throw new Error(`process.exit called with "${code}"`);
     }) as any);
     
     // Mock process.stdin
@@ -55,6 +58,9 @@ describe('tui-components', () => {
       value: originalStdin,
       writable: true
     });
+    
+    // Ensure process.exit is properly restored
+    process.exit = originalExit;
   });
 
   describe('launchTUI', () => {
@@ -72,7 +78,7 @@ describe('tui-components', () => {
         await launchTUI('empty-session');
       } catch (error) {
         // Expected - process.exit is called
-        expect((error as Error).message).toBe('process.exit called');
+        expect((error as Error).message).toBe('process.exit called with "0"');
       }
 
       expect(mockedCorrelateOperations).toHaveBeenCalledWith('empty-session', undefined);
@@ -116,7 +122,7 @@ describe('tui-components', () => {
         await launchTUI('test-session', '/test/session.jsonl');
       } catch (error) {
         // Expected - process.exit is called
-        expect((error as Error).message).toBe('process.exit called');
+        expect((error as Error).message).toBe('process.exit called with "0"');
       }
 
       expect(mockedCorrelateOperations).toHaveBeenCalledWith('test-session', '/test/session.jsonl');
@@ -132,7 +138,7 @@ describe('tui-components', () => {
         await launchTUI('error-session');
       } catch (error) {
         // Expected - process.exit is called
-        expect((error as Error).message).toBe('process.exit called');
+        expect((error as Error).message).toBe('process.exit called with "0"');
       }
 
       expect(console.error).toHaveBeenCalledWith('Failed to load operations:', expect.any(Error));

@@ -3,13 +3,16 @@ import { createClient } from 'redis';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as statsCollector from './stats-collector';
 
-// Mock Redis and fs
+// Mock Redis, fs, and stats-collector
 jest.mock('redis');
 jest.mock('fs');
+jest.mock('./stats-collector');
 
 const mockedRedis = jest.mocked(createClient);
 const mockedFs = jest.mocked(fs);
+const mockedStatsCollector = jest.mocked(statsCollector);
 
 describe('correlation-engine: Real-world JSONL-only scenarios', () => {
   let mockRedisClient: any;
@@ -20,11 +23,15 @@ describe('correlation-engine: Real-world JSONL-only scenarios', () => {
     
     mockRedisClient = {
       connect: jest.fn(),
+      disconnect: jest.fn(),
       isOpen: true,
       keys: jest.fn().mockResolvedValue([]), // Always empty Redis (no hook data)
       get: jest.fn()
     };
     mockedRedis.mockReturnValue(mockRedisClient);
+    
+    // Mock stats collector to avoid Redis calls
+    mockedStatsCollector.getSnapshotForSession.mockResolvedValue(null);
   });
 
   describe('ACTUAL Claude JSONL format (no hooks)', () => {

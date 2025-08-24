@@ -64,6 +64,49 @@ program
     }
   });
 
+// Stats command - run claude /context and display session info
+program
+  .command('stats')
+  .description('Show current Claude session statistics and context')
+  .action(async () => {
+    const { collectContextStats, storeCurrentSnapshot } = await import('../lib/stats-collector');
+    
+    try {
+      console.log('🔍 Fetching Claude session statistics...\n');
+      
+      const stats = await collectContextStats();
+      
+      if (!stats) {
+        console.error('❌ Could not collect context statistics');
+        process.exit(1);
+      }
+      
+      // Parse and display the context stats
+      const contextData = JSON.parse(stats.display);
+      
+      console.log(`📊 Initial context loaded: ${stats.actualTokens.toLocaleString()} tokens`);
+      console.log(`🔗 Session ID: ${stats.sessionId}`);
+      console.log(`📋 Usage breakdown:`);
+      console.log(`   Input tokens: ${contextData.usage.input_tokens || 0}`);
+      console.log(`   Cache creation: ${contextData.usage.cache_creation_input_tokens || 0}`);
+      console.log(`   Cache read: ${contextData.usage.cache_read_input_tokens || 0}`);
+      console.log(`   Output tokens: ${contextData.usage.output_tokens || 0}`);
+      
+      // Store as current snapshot for future sessions
+      await storeCurrentSnapshot(stats);
+      console.log(`\n✅ Context snapshot updated in Redis`);
+      
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        console.error('❌ Claude Code not found. Make sure it\'s installed and in your PATH.');
+      } else {
+        console.error('❌ Error running claude /context:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
+
 
 // Statusline command
 program

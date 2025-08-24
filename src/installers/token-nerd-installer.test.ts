@@ -3,6 +3,12 @@ import * as path from 'path';
 import { TokenNerdInstaller } from './token-nerd-installer';
 import { TEST_TEMP_DIR, createMockFiles } from '../test-setup';
 
+// Mock stats-collector module to prevent Claude execution during tests
+jest.mock('../lib/stats-collector', () => ({
+  collectContextStats: jest.fn(),
+  storeCurrentSnapshot: jest.fn()
+}));
+
 // Mock console methods to prevent test output clutter
 const mockConsoleLog = jest.fn();
 const mockConsoleWarn = jest.fn();
@@ -29,12 +35,27 @@ afterAll(() => {
 
 describe('TokenNerdInstaller', () => {
   let installer: TokenNerdInstaller;
+  let mockCollectContextStats: jest.MockedFunction<any>;
+  let mockStoreCurrentSnapshot: jest.MockedFunction<any>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     // Create mock files after test-setup cleanup
     createMockFiles();
     installer = new TokenNerdInstaller();
+    
+    // Set up mocks for stats collection
+    const statsCollectorModule = require('../lib/stats-collector');
+    mockCollectContextStats = statsCollectorModule.collectContextStats;
+    mockStoreCurrentSnapshot = statsCollectorModule.storeCurrentSnapshot;
+    
+    // Default mock behavior - successful stats collection
+    mockCollectContextStats.mockResolvedValue({
+      display: 'mock stats',
+      actualTokens: 1000,
+      sessionId: 'mock-session'
+    });
+    mockStoreCurrentSnapshot.mockResolvedValue(undefined);
   });
 
   describe('install', () => {
@@ -45,6 +66,14 @@ describe('TokenNerdInstaller', () => {
       expect(status['mcp-server']).toBe(true);
       expect(status['hooks']).toBe(true);
       expect(status['statusline']).toBe(true);
+      
+      // Verify stats collection was called
+      expect(mockCollectContextStats).toHaveBeenCalled();
+      expect(mockStoreCurrentSnapshot).toHaveBeenCalledWith({
+        display: 'mock stats',
+        actualTokens: 1000,
+        sessionId: 'mock-session'
+      });
     });
 
     it('should rollback on installation failure', async () => {
@@ -74,6 +103,40 @@ describe('TokenNerdInstaller', () => {
       
       // Install again - should not throw
       await expect(installer.install()).resolves.not.toThrow();
+    });
+    
+    it('should handle stats collection failure gracefully', async () => {
+      // Mock stats collection to fail
+      mockCollectContextStats.mockRejectedValue(new Error('Claude not running'));
+      
+      // Should still complete installation successfully
+      await expect(installer.install()).resolves.not.toThrow();
+      
+      const status = await installer.getStatus();
+      expect(status['mcp-server']).toBe(true);
+      expect(status['hooks']).toBe(true);
+      expect(status['statusline']).toBe(true);
+      
+      // Verify stats collection was attempted but store was not called
+      expect(mockCollectContextStats).toHaveBeenCalled();
+      expect(mockStoreCurrentSnapshot).not.toHaveBeenCalled();
+    });
+    
+    it('should handle null stats collection result gracefully', async () => {
+      // Mock stats collection to return null
+      mockCollectContextStats.mockResolvedValue(null);
+      
+      // Should still complete installation successfully
+      await expect(installer.install()).resolves.not.toThrow();
+      
+      const status = await installer.getStatus();
+      expect(status['mcp-server']).toBe(true);
+      expect(status['hooks']).toBe(true);
+      expect(status['statusline']).toBe(true);
+      
+      // Verify stats collection was attempted but store was not called
+      expect(mockCollectContextStats).toHaveBeenCalled();
+      expect(mockStoreCurrentSnapshot).not.toHaveBeenCalled();
     });
   });
 

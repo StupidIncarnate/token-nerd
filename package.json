@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "commander": "^9.0.0",
+    "glob": "^11.0.3",
     "ink": "^4.0.0",
     "inquirer": "^9.0.0",
     "react": "^18.0.0",
@@ -20,6 +21,7 @@
     "tsx": "^3.0.0"
   },
   "devDependencies": {
+    "@types/glob": "^8.1.0",
     "@types/inquirer": "^9.0.9",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.8.0",

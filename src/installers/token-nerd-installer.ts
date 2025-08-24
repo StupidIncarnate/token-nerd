@@ -32,7 +32,24 @@ export class TokenNerdInstaller {
         console.log();
       }
       
-      console.log('✅ Token Nerd installation complete!\n');
+      // Collect initial context stats for Redis
+      console.log('📊 Collecting initial Claude context statistics...');
+      try {
+        const { collectContextStats, storeCurrentSnapshot } = await import('../lib/stats-collector');
+        const stats = await collectContextStats();
+        
+        if (stats) {
+          await storeCurrentSnapshot(stats);
+          console.log(`✓ Initial context snapshot stored: ${stats.actualTokens.toLocaleString()} tokens`);
+        } else {
+          console.log('⚠️  No stats collected - Claude may not be running or accessible');
+        }
+      } catch (error) {
+        console.log('⚠️  Could not collect initial stats:', (error as Error).message);
+        console.log('   This is normal if Claude is not currently running');
+      }
+      
+      console.log('\n✅ Token Nerd installation complete!\n');
       console.log('🔄 IMPORTANT: Restart Claude to enable token tracking:');
       console.log('   1. Exit claude session (Ctrl+C or type "exit")');
       console.log('   2. Run: claude');

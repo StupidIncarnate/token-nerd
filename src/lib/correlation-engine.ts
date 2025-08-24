@@ -4,6 +4,9 @@ import * as path from 'path';
 import * as os from 'os';
 import { parseJsonl, JsonlMessage } from './jsonl-utils';
 import { estimateTokensFromContent } from './token-calculator';
+import { getSnapshotForSession } from './stats-collector';
+
+export { JsonlMessage };
 
 export interface Operation {
   tool: string;
@@ -193,6 +196,9 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
     return [];
   }
   
+  // Get context snapshot for this session to show startup cost
+  const contextSnapshot = await getSnapshotForSession(sessionId);
+  
   // Filter to only assistant messages with usage data
   const assistantMessages = messages.filter(msg => 
     msg.usage && (
@@ -209,21 +215,40 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
   
   const bundles: Bundle[] = [];
   
+  // Add context startup cost as first bundle if available
+  if (contextSnapshot && contextSnapshot.stats) {
+    // Use session start time or earlier to ensure it appears first
+    const sessionStartTime = assistantMessages.length > 0 ? assistantMessages[0].timestamp - 1000 : contextSnapshot.timestamp;
+    
+    const startupOperation: Operation = {
+      tool: 'Context',
+      params: {},
+      response: contextSnapshot.stats.display,
+      responseSize: contextSnapshot.stats.display.length,
+      timestamp: sessionStartTime,
+      session_id: sessionId,
+      tokens: contextSnapshot.stats.actualTokens,
+      allocation: 'exact',
+      details: `${Math.round(contextSnapshot.stats.actualTokens/1000)}k init cost`
+    };
+    
+    bundles.push({
+      id: 'startup-context',
+      timestamp: sessionStartTime,
+      operations: [startupOperation],
+      totalTokens: contextSnapshot.stats.actualTokens
+    });
+  }
+  
   // Process each assistant message with delta calculation
   let previousTotalTokens = 0;
   
   for (let i = 0; i < assistantMessages.length; i++) {
     const message = assistantMessages[i];
     
-    // Calculate total tokens for this message
-    const currentTotalTokens = (message.usage?.input_tokens || 0) + 
-                               (message.usage?.output_tokens || 0) + 
-                               (message.usage?.cache_creation_input_tokens || 0) + 
-                               (message.usage?.cache_read_input_tokens || 0);
-    
-    // Delta tokens = incremental cost since last message
-    const messageTokens = currentTotalTokens - previousTotalTokens;
-    previousTotalTokens = currentTotalTokens;
+    // For JSONL-only scenarios, count only output tokens
+    // This represents the actual cost to the user for the assistant's response
+    const messageTokens = message.usage?.output_tokens || 0;
     
     // Find all operations that match this JSONL position by sequence number (i+1 = 1-based)
     const sequenceNumber = i + 1;
@@ -252,44 +277,17 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         totalTokens: messageTokens
       });
     } else if (matchingOperations.length === 1) {
-      // Single tool call + message content - proportional allocation
-      const messageOperation: Operation = {
-        tool: 'Assistant',
-        params: {},
-        response: message.content,
-        responseSize: JSON.stringify(message.content).length,
-        timestamp: message.timestamp,
-        session_id: sessionId,
-        message_id: message.id,
-        usage: message.usage,
-        tokens: 0, // Will be calculated below
-        allocation: 'proportional',
-        details: 'message'
-      };
-      
-      // Calculate token allocation using token calculator
-      const redisResponseContent = typeof matchingOperations[0].response === 'string' 
-        ? matchingOperations[0].response 
-        : JSON.stringify(matchingOperations[0].response);
-      const messageResponseContent = typeof messageOperation.response === 'string'
-        ? messageOperation.response
-        : JSON.stringify(messageOperation.response);
-        
-      const redisTokens = estimateTokensFromContent(redisResponseContent);
-      const messageTokensAlloc = estimateTokensFromContent(messageResponseContent);
-      
+      // Single tool call - assign all delta tokens to the operation
       const operation = {
         ...matchingOperations[0],
-        tokens: redisTokens,
-        allocation: 'proportional' as const
+        tokens: messageTokens,
+        allocation: 'exact' as const
       };
-      
-      messageOperation.tokens = messageTokensAlloc;
       
       bundles.push({
         id: message.id,
         timestamp: message.timestamp,
-        operations: [operation, messageOperation],
+        operations: [operation],
         totalTokens: messageTokens
       });
     } else {
