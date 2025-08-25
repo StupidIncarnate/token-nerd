@@ -1,6 +1,6 @@
 // Simplified terminal-based implementation for token analysis
 import { correlateOperations, Bundle, Operation } from './correlation-engine';
-import { getTokenCount } from './token-calculator';
+import { getTokenCount, calculateCumulativeTotal, calculateConversationGrowth, calculateRemainingCapacity } from './token-calculator';
 import * as readline from 'readline';
 
 type SortMode = 'time' | 'tokens' | 'operation';
@@ -75,15 +75,27 @@ class TokenAnalyzer {
       
       switch (this.state.sortMode) {
         case 'tokens':
-          result = a.totalTokens - b.totalTokens;
+          // For token sorting, prioritize context growth operations
+          const aOp = a.operations[0];
+          const bOp = b.operations[0];
+          
+          // Sort ToolResponses by size, others by tokens
+          const aValue = aOp?.tool === 'ToolResponse' ? aOp.responseSize :
+                        aOp?.contextGrowth > 0 ? aOp.contextGrowth : 
+                        a.totalTokens;
+          const bValue = bOp?.tool === 'ToolResponse' ? bOp.responseSize :
+                        bOp?.contextGrowth > 0 ? bOp.contextGrowth :
+                        b.totalTokens;
+          
+          result = aValue - bValue;
           break;
         case 'time':
           result = a.timestamp - b.timestamp;
           break;
         case 'operation':
-          const aOp = a.operations[0]?.tool || '';
-          const bOp = b.operations[0]?.tool || '';
-          result = aOp.localeCompare(bOp);
+          const aOpTool = a.operations[0]?.tool || '';
+          const bOpTool = b.operations[0]?.tool || '';
+          result = aOpTool.localeCompare(bOpTool);
           break;
         default:
           return 0;
@@ -142,6 +154,33 @@ class TokenAnalyzer {
     console.log(`│ Page ${currentPage + 1}/${Math.ceil(flatItems.length / itemsPerPage)} | Items ${startIndex + 1}-${endIndex} of ${flatItems.length}`);
     console.log(`└${'─'.repeat(78)}┘\n`);
 
+    // Calculate actual context window deltas (what each message adds)
+    const contextTotals = new Map<string, number>();
+    const contextDeltas = new Map<string, number>();
+    
+    let previousTotal = 0;
+    let runningTotal = 0;
+    
+    this.state.bundles.forEach(b => {
+      const op = b.operations[0];
+      let contextDelta = 0;
+      
+      if (op.usage && op.allocation === 'exact') {
+        // Get cumulative total for this message
+        const currentTotal = calculateCumulativeTotal(op.usage);
+        
+        // Calculate actual context delta (what this message added)
+        contextDelta = currentTotal - previousTotal;
+        previousTotal = currentTotal;
+        runningTotal = currentTotal;
+      }
+      // For messages without usage (User messages), use the last known total
+      
+      // Store both values for display
+      contextTotals.set(b.id, runningTotal);
+      contextDeltas.set(b.id, contextDelta);
+    });
+    
     // Operations list (paginated)
     visibleItems.forEach((item, i) => {
       const actualIndex = startIndex + i;
@@ -155,22 +194,72 @@ class TokenAnalyzer {
           : ' ';
         
         const timeStr = new Date(bundle.timestamp).toLocaleTimeString();
+        const contextTotal = contextTotals.get(bundle.id) || 0;
+        const contextStr = contextTotal.toLocaleString('en-US', { 
+          minimumIntegerDigits: 6, 
+          useGrouping: true 
+        }).padStart(8);
+        
+        const contextDelta = contextDeltas.get(bundle.id) || 0;
+        const capacity = calculateRemainingCapacity(contextTotal);
         
         let description: string;
         let tokensDisplay: string;
+        let icon: string;
         
         if (bundle.operations.length === 1) {
           const op = bundle.operations[0];
-          description = `${op.tool}: ${op.details}`;
-          tokensDisplay = `${bundle.totalTokens.toLocaleString()} tokens`;
+          
+          // Choose icon based on tool type
+          switch(op.tool) {
+            case 'User': icon = '👤'; break;
+            case 'ToolResponse': icon = '📥'; break;
+            case 'Assistant': icon = '🤖'; break;
+            case 'Context': icon = '📊'; break;
+            case 'Read': icon = '📖'; break;
+            case 'Write': icon = '✏️'; break;
+            case 'Edit': icon = '📝'; break;
+            case 'Bash': icon = '💻'; break;
+            case 'LS': icon = '📁'; break;
+            default: icon = '🔧';
+          }
+          
+          // Add cache expiration warning to description if present
+          const cacheWarning = op.details.includes('⚠️') ? '' : 
+                              (op.timeGap && op.timeGap > 300) ? ' ⚠️' : '';
+          description = `${icon} ${op.tool}: ${op.details}${cacheWarning}`;
+          
+          // Format tokens based on operation type - show actual context delta
+          if (op.tool === 'ToolResponse') {
+            // Show size for tool responses
+            tokensDisplay = `[${op.details}]`;
+          } else if (op.tool === 'User') {
+            // Show estimated tokens for user messages
+            tokensDisplay = `~${op.tokens} est`;
+          } else if (contextDelta > 0) {
+            // Show actual context window delta (what this message added)
+            tokensDisplay = `+${contextDelta.toLocaleString()} context`;
+            if (op.generationCost > 0) {
+              tokensDisplay += ` (${op.generationCost.toLocaleString()} gen)`;
+            }
+          } else if (op.generationCost > 0) {
+            tokensDisplay = `${op.generationCost.toLocaleString()} gen`;
+          } else {
+            tokensDisplay = `${op.tokens.toLocaleString()} tokens`;
+          }
         } else {
-          description = `Bundle (${bundle.operations.length} ops)`;
+          icon = '📦';
+          description = `${icon} Bundle (${bundle.operations.length} ops)`;
           tokensDisplay = `${bundle.totalTokens.toLocaleString()} tokens`;
         }
         
-        const line = `${prefix}${timeStr} | ${tokensDisplay} | ${description}`;
+        // Add capacity warning if near limit
+        const capacityWarning = capacity.isNearLimit ? ' ⚠️' : '';
+        const remainingStr = `${Math.round(capacity.remaining/1000)}k left`;
+        
+        const line = `${prefix}${timeStr} [${contextStr}] | ${tokensDisplay.padEnd(25)} | ${description}${capacityWarning}`;
         if (isSelected) {
-          console.log(`\x1b[44m${line.padEnd(80)}\x1b[0m`); // Blue background
+          console.log(`\x1b[44m${line.padEnd(100)}\x1b[0m`); // Blue background
         } else {
           console.log(line);
         }
@@ -219,7 +308,74 @@ class TokenAnalyzer {
     
     bundle.operations.forEach((operation, index) => {
       allLines.push(`┌─ OPERATION ${index + 1}: ${operation.tool} ─${'─'.repeat(Math.max(1, 50 - operation.tool.length))}`);
-      allLines.push(`│ Tokens: ${operation.tokens.toLocaleString()} (${operation.allocation})`);
+      
+      // Show different info based on operation type
+      if (operation.tool === 'System') {
+        allLines.push(`│ ⚠️ Hidden System Context`);
+        allLines.push(`│ Size: ${(operation.responseSize / 1024).toFixed(1)}KB`);
+        allLines.push(`│ Estimated Impact: ~${operation.tokens.toLocaleString()} tokens`);
+      } else if (operation.tool === 'ToolResponse') {
+        allLines.push(`│ Size: ${(operation.responseSize / 1024).toFixed(1)}KB`);
+        allLines.push(`│ Estimated Tokens: ~${operation.tokens.toLocaleString()}`);
+        allLines.push(`│ Impact: This content will be processed in the next Assistant message`);
+      } else if (operation.tool === 'User') {
+        allLines.push(`│ Message Length: ${operation.responseSize} chars`);
+        allLines.push(`│ Estimated Tokens: ~${operation.tokens.toLocaleString()}`);
+        if (operation.timeGap && operation.timeGap > 300) {
+          allLines.push(`│ ⚠️ Time Gap: ${Math.round(operation.timeGap/60)} minutes (cache may expire)`);
+        }
+      } else {
+        allLines.push(`│ Tokens: ${operation.tokens.toLocaleString()} (${operation.allocation})`);
+        
+        // Show context growth vs generation split
+        if (operation.contextGrowth > 0 || operation.generationCost > 0) {
+          allLines.push(`│ Breakdown:`);
+          if (operation.contextGrowth > 0) {
+            allLines.push(`│   Context Growth: +${operation.contextGrowth.toLocaleString()} (new content added)`);
+          }
+          if (operation.generationCost > 0) {
+            allLines.push(`│   Generation Cost: ${operation.generationCost.toLocaleString()} (output tokens)`);
+          }
+        }
+        
+        // Show cache metrics
+        if (operation.cacheEfficiency !== undefined) {
+          allLines.push(`│ Cache Efficiency: ${operation.cacheEfficiency.toFixed(1)}%${operation.cacheEfficiency < 50 ? ' ⚠️ LOW' : ''}`);
+        }
+        
+        if (operation.timeGap && operation.timeGap > 300) {
+          allLines.push(`│ ⚠️ Time Gap: ${Math.round(operation.timeGap/60)} minutes (cache expired)`);
+        }
+        
+        // Show ephemeral cache info
+        if (operation.ephemeral5m || operation.ephemeral1h) {
+          allLines.push(`│ Ephemeral Cache:`);
+          if (operation.ephemeral5m) {
+            allLines.push(`│   5-min: ${operation.ephemeral5m.toLocaleString()} tokens`);
+          }
+          if (operation.ephemeral1h) {
+            allLines.push(`│   1-hour: ${operation.ephemeral1h.toLocaleString()} tokens`);
+          }
+        }
+        
+        // Show full token breakdown if available
+        if (operation.usage) {
+          allLines.push(`│ Full Usage:`);
+          if (operation.usage.cache_creation_input_tokens) {
+            allLines.push(`│   Cache Creation: ${operation.usage.cache_creation_input_tokens.toLocaleString()}`);
+          }
+          if (operation.usage.cache_read_input_tokens) {
+            allLines.push(`│   Cache Read: ${operation.usage.cache_read_input_tokens.toLocaleString()}`);
+          }
+          if (operation.usage.input_tokens) {
+            allLines.push(`│   Input: ${operation.usage.input_tokens.toLocaleString()}`);
+          }
+          if (operation.usage.output_tokens) {
+            allLines.push(`│   Output: ${operation.usage.output_tokens.toLocaleString()}`);
+          }
+        }
+      }
+      
       allLines.push(`│ Response Size: ${operation.responseSize.toLocaleString()} chars`);
       allLines.push(`│ Sequence: ${operation.sequence || 'N/A'}`);
       allLines.push(`│ Message ID: ${operation.message_id || 'N/A'}`);

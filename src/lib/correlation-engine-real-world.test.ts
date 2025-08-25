@@ -51,22 +51,29 @@ describe('correlation-engine: Real-world JSONL-only scenarios', () => {
 
       const result = await correlateOperations('test-session', '/test/session.jsonl');
 
-      // Should create 2 individual bundles (one per message)
-      expect(result).toHaveLength(2);
+      // Should create 3 individual bundles (user + 2 assistant messages)
+      expect(result).toHaveLength(3);
       
-      // Check first bundle
-      const bundle1 = result[0];
-      expect(bundle1.operations).toHaveLength(1);
-      expect(bundle1.totalTokens).toBe(500); // Only output tokens (no input or cache)
-      expect(bundle1.operations[0].message_id).toBe('msg_123');
-      expect(bundle1.operations[0].tokens).toBe(500);
+      // Check user message bundle (first)
+      const userBundle = result.find(b => b.operations[0].tool === 'User');
+      expect(userBundle).toBeDefined();
+      expect(userBundle!.operations[0].details).toBe('test question');
+      
+      // Check first assistant bundle
+      const bundle1 = result.find(b => b.operations[0].message_id === 'msg_123');
+      expect(bundle1).toBeDefined();
+      expect(bundle1!.operations).toHaveLength(1);
+      expect(bundle1!.totalTokens).toBe(200); // Only cache_creation_input_tokens (contextGrowth)
+      expect(bundle1!.operations[0].tokens).toBe(200); // contextGrowth, not output tokens
+      expect(bundle1!.operations[0].generationCost).toBe(500); // output tokens
 
-      // Check second bundle  
-      const bundle2 = result[1];
-      expect(bundle2.operations).toHaveLength(1);
-      expect(bundle2.totalTokens).toBe(300); // Only output tokens
-      expect(bundle2.operations[0].message_id).toBe('msg_124');
-      expect(bundle2.operations[0].tokens).toBe(300);
+      // Check second assistant bundle  
+      const bundle2 = result.find(b => b.operations[0].message_id === 'msg_124');
+      expect(bundle2).toBeDefined();
+      expect(bundle2!.operations).toHaveLength(1);
+      expect(bundle2!.totalTokens).toBe(300); // Only output tokens (no cache_creation)
+      expect(bundle2!.operations[0].tokens).toBe(300);
+      expect(bundle2!.operations[0].generationCost).toBe(300);
     });
 
     it('should handle JSONL with no usage data gracefully', async () => {
@@ -80,8 +87,16 @@ describe('correlation-engine: Real-world JSONL-only scenarios', () => {
 
       const result = await correlateOperations('empty-usage-session', '/test/session.jsonl');
 
-      // Should return empty since no usage data found
-      expect(result).toEqual([]);
+      // Should create bundles for User and System messages even without usage data
+      expect(result).toHaveLength(2);
+      
+      const userBundle = result.find(r => r.operations[0].tool === 'User');
+      expect(userBundle).toBeDefined();
+      expect(userBundle!.operations[0].details).toBe('test');
+      
+      const systemBundle = result.find(r => r.operations[0].tool === 'System');
+      expect(systemBundle).toBeDefined();
+      expect(systemBundle!.operations[0].details).toBe('Hidden system prompt/context');
     });
 
     it('should filter out messages without input_tokens or output_tokens', async () => {
@@ -99,16 +114,20 @@ describe('correlation-engine: Real-world JSONL-only scenarios', () => {
 
       const result = await correlateOperations('filter-test-session', '/test/session.jsonl');
 
-      // Should create 2 individual bundles
-      expect(result).toHaveLength(2);
+      // Should create 3 individual bundles (including empty usage)
+      expect(result).toHaveLength(3);
       
       const goodBundle = result.find(b => b.operations[0].message_id === 'msg_good');
       expect(goodBundle).toBeDefined();
       expect(goodBundle!.totalTokens).toBe(50); // Only output tokens
       
+      const emptyBundle = result.find(b => b.operations[0].message_id === 'msg_empty');
+      expect(emptyBundle).toBeDefined();
+      expect(emptyBundle!.totalTokens).toBe(0); // Empty usage
+      
       const cacheBundle = result.find(b => b.operations[0].message_id === 'msg_cache');
       expect(cacheBundle).toBeDefined();
-      expect(cacheBundle!.totalTokens).toBe(0); // 0 + 0 (no output tokens)
+      expect(cacheBundle!.totalTokens).toBe(200); // cache_creation_input_tokens
     });
 
     it('should handle malformed JSONL lines gracefully', async () => {
@@ -188,8 +207,10 @@ describe('correlation-engine: Real-world JSONL-only scenarios', () => {
       expect(bundle.operations).toHaveLength(1);
 
       const op = bundle.operations[0];
-      // Should ONLY count output tokens, NOT input or cache tokens
-      expect(op.tokens).toBe(50); // Only output tokens
+      // tokens should be contextGrowth (cache_creation_input_tokens)
+      expect(op.tokens).toBe(200); // cache_creation_input_tokens (contextGrowth)
+      expect(op.generationCost).toBe(50); // output tokens 
+      expect(op.contextGrowth).toBe(200); // cache_creation_input_tokens
       expect(op.usage?.cache_creation_input_tokens).toBe(200);
       expect(op.usage?.cache_read_input_tokens).toBe(300);
     });
@@ -254,10 +275,16 @@ describe('correlation-engine: Real-world JSONL-only scenarios', () => {
 
       const result = await correlateOperations('no-usage-session', '/test/session.jsonl');
 
-      // Should create synthetic operations for messages with usage (even if zero)
-      expect(result).toHaveLength(1);
-      expect(result[0].operations).toHaveLength(1); // Only msg_zero_usage
-      expect(result[0].operations[0].tokens).toBe(0);
+      // Should create operations for user message + assistant with zero usage
+      expect(result).toHaveLength(2);
+      
+      const userBundle = result.find(r => r.operations[0].tool === 'User');
+      expect(userBundle).toBeDefined();
+      expect(userBundle!.operations[0].details).toBe('user message');
+      
+      const zeroUsageBundle = result.find(r => r.operations[0].message_id === 'msg_zero_usage');
+      expect(zeroUsageBundle).toBeDefined();
+      expect(zeroUsageBundle!.operations[0].tokens).toBe(0);
     });
   });
 });

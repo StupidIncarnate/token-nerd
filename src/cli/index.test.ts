@@ -26,6 +26,12 @@ jest.mock('../lib/session-tree-view', () => ({
   selectSessionWithTreeView: mockSelectSessionWithTreeView
 }));
 
+// Mock the TUI components to prevent console bleedthrough
+const mockLaunchTUI = jest.fn() as jest.MockedFunction<any>;
+jest.mock('../lib/tui-components', () => ({
+  launchTUI: mockLaunchTUI
+}));
+
 // Mock the statusline functions  
 const mockGetRealTokenCount = jest.fn() as jest.MockedFunction<any>;
 const mockFormatTokenCount = jest.fn() as jest.MockedFunction<any>;
@@ -37,8 +43,18 @@ jest.mock('../statusline/config', () => ({
 }));
 
 describe('CLI Integration Tests', () => {
+  let consoleSpy: any;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    // Configure mock to resolve immediately without side effects
+    mockLaunchTUI.mockResolvedValue(undefined);
+    // Mock console.log to prevent CLI output during tests
+    consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
   });
 
   describe('Session listing functionality', () => {

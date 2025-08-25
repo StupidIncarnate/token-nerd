@@ -7,6 +7,10 @@ interface TokenUsage {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   total_tokens?: number;
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number;
+    ephemeral_1h_input_tokens?: number;
+  };
 }
 
 interface TranscriptMessage {
@@ -46,10 +50,7 @@ export async function getTokenCount(transcriptPath: string): Promise<number> {
         
         if (usage) {
           // Calculate total for this message
-          const messageTotal = (usage.input_tokens || 0) + 
-                              (usage.output_tokens || 0) + 
-                              (usage.cache_read_input_tokens || 0) + 
-                              (usage.cache_creation_input_tokens || 0);
+          const messageTotal = calculateCumulativeTotal(usage);
           
           // Track the highest total we've seen (tokens accumulate)
           if (messageTotal > highestTotal) {
@@ -71,6 +72,41 @@ export async function getTokenCount(transcriptPath: string): Promise<number> {
   }
 
   return highestTotal;
+}
+
+/**
+ * Calculate cumulative total from usage data
+ * Used by both getTokenCount and TUI for consistency
+ */
+export function calculateCumulativeTotal(usage: TokenUsage): number {
+  return (usage.input_tokens || 0) + 
+         (usage.output_tokens || 0) + 
+         (usage.cache_read_input_tokens || 0) + 
+         (usage.cache_creation_input_tokens || 0);
+}
+
+/**
+ * Calculate conversation growth (input + output tokens only)
+ * This represents actual context window consumption, not caching efficiency
+ */
+export function calculateConversationGrowth(usage: TokenUsage): number {
+  return (usage.input_tokens || 0) + (usage.output_tokens || 0);
+}
+
+/**
+ * Calculate remaining context window capacity
+ * Claude Sonnet 4 has 200k token limit
+ */
+export function calculateRemainingCapacity(currentTotal: number, contextWindowLimit: number = 200000): {
+  remaining: number;
+  percentage: number;
+  isNearLimit: boolean;
+} {
+  const remaining = Math.max(0, contextWindowLimit - currentTotal);
+  const percentage = (remaining / contextWindowLimit) * 100;
+  const isNearLimit = percentage < 10; // Less than 10% remaining
+  
+  return { remaining, percentage, isNearLimit };
 }
 
 /**

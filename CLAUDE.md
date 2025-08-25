@@ -53,7 +53,6 @@ npm install -g ./token-nerd-0.1.0.tgz
 npm test -- src/installers/utils.test.ts
 npm test -- src/installers/
 
-# Lint and type checking
-npm run lint
-npm run typecheck
+# Type checking (manual)
+npx tsc --noEmit
 ```
