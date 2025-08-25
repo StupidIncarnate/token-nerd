@@ -1,13 +1,18 @@
 # Token Nerd
 
-**DUAL-COMPONENT SYSTEM**: Replace Claude's inaccurate statusline estimates with real token counts AND provide detailed drill-down analysis.
+Token Nerd lets you see on a message by message basis how Claude's context window is filling up so you can troubleshoot why during certain sessions, Claude was only able to touch one file before needing to compact. 
 
-## The Problem
+## How It Works
 
-Claude Code's statusline shows inaccurate estimates (40-75k when actual is 130-180k). You need to know:
-- What operations caused token spikes
-- Which files are expensive to read
-- How to optimize your workflow
+1. **Automatic Installation** - `npm install -g token-nerd` sets up everything via postinstall script
+2. **MCP Server** - Starts with Claude Code, manages Redis lifecycle
+3. **Hooks** - Capture every tool operation in `~/.claude/settings.json`
+4. **Statusline** - Shows real token counts from JSONL transcript parsing
+5. **Interactive TUI** - Lets you correlate context window spikes and scaling window fills
+
+This will install an MCP hook that watches all tool calls and stores their payloads in redis for later viewing via `token-nerd`. Once you've installed the package and closed any Claude sessions, it will start recording data as soon as you open a Claude session. When you run into a troubling Claude session, you can launch the tool and start troubleshooting your session. 
+
+If you have a statusline already, it will tack on an indicator. Otherwise, it will also add a statusline bit to your Claude session so you can spot things in real time. As well as know when you're actually getting close to compacting. 
 
 ## Quick Start
 
@@ -23,10 +28,10 @@ npm install -g token-nerd
 # ✅ All operations captured for analysis
 
 # 4. Analyze anytime:
-token-nerd  # Interactive analysis (coming soon)
+token-nerd  # Interactive analysis
 ```
 
-## What You'll See
+## What You'll See when you run token-nerd
 
 Interactive terminal UI with live sorting and hierarchical view:
 
@@ -43,30 +48,9 @@ Session: ce03c353 | Total: 83,788 tokens | Sort: TOKENS
 Controls: [t]okens | [c]hronological | [Tab] expand | [Enter] view
 ```
 
-## Current Status
 
-**✅ COMPONENT 1: STATUSLINE INTEGRATION** 
-- Real-time accurate token counts in Claude's statusline
-- Shows format: `🐿️ 156,107 (100%)` with proper percentage warnings
-- Works immediately after installation
-
-**🚧 COMPONENT 2: ANALYSIS CLI**
-- ✅ Operation capture (hooks writing to Redis)
-- ✅ Session tracking and selection
-- ❌ Interactive TUI (coming soon)
-- ❌ Token correlation engine (coming soon)
-
-## How It Works
-
-1. **Automatic Installation** - `npm install -g` sets up everything via postinstall script
-2. **MCP Server** - Starts with Claude Code, manages Redis lifecycle  
-3. **Hooks** - Capture every tool operation in `~/.claude/settings.json`
-4. **Statusline** - Shows real token counts from JSONL transcript parsing
-5. **Future: Interactive TUI** - Will correlate operations with token costs
-
-## Implementation
-
-See [IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for build steps and acceptance criteria.
+## How To Troubleshoot Context Window Gorging
+That is indeed the question. Once there's good numbers to display, I'll fill this in. 
 
 ## Architecture
 

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import inquirer from 'inquirer';
-import { getTokenCount } from './token-calculator';
+import { getCurrentTokenCount } from './token-calculator';
 
 interface Session {
   id: string;
@@ -115,7 +115,7 @@ export class SessionTreeView {
       }
       
       // Get accurate token count from JSONL (same method as statusline)
-      const tokens = await getTokenCount(filePath);
+      const tokens = await getCurrentTokenCount(filePath);
       
       sessions.push({
         id: sessionId,

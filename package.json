@@ -7,6 +7,7 @@
     "token-nerd": "./src/cli/index.ts"
   },
   "scripts": {
+    "typecheck": "npx tsc --noEmit",
     "test": "jest",
     "postinstall": "npx tsx postinstall.ts",
     "preuninstall": "npx tsx preuninstall.ts"

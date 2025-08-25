@@ -1,5 +1,6 @@
 import { 
   getTokenCount, 
+  getCurrentTokenCount,
   calculateCumulativeTotal, 
   calculateConversationGrowth, 
   calculateRemainingCapacity,
@@ -183,6 +184,60 @@ describe('token-calculator', () => {
       const result = await getTokenCount('/test/session.jsonl');
 
       expect(result).toBe(275); // Max of 150 and 275
+    });
+  });
+
+  describe('getCurrentTokenCount', () => {
+    const mockCreateAsyncIterator = (lines: string[]) => {
+      const mockRl = {
+        [Symbol.asyncIterator]: async function* () {
+          for (const line of lines) {
+            yield line;
+          }
+        }
+      };
+      
+      mockedReadline.createInterface.mockReturnValue(mockRl as any);
+    };
+
+    it('should return 0 for non-existent file', async () => {
+      mockedFs.existsSync.mockReturnValue(false);
+
+      const result = await getCurrentTokenCount('/non/existent/file.jsonl');
+      
+      expect(result).toBe(0);
+      expect(mockedFs.existsSync).toHaveBeenCalledWith('/non/existent/file.jsonl');
+    });
+
+    it('should return token count from last message with usage data', async () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      
+      const lines = [
+        '{"type":"user","message":{"content":"hi"}}', // no usage
+        '{"type":"assistant","message":{"usage":{"input_tokens":50,"output_tokens":25}}}',
+        '{"type":"assistant","message":{"usage":{"input_tokens":100,"output_tokens":50}}}' // this should be returned
+      ];
+
+      mockCreateAsyncIterator(lines);
+
+      const result = await getCurrentTokenCount('/test/session.jsonl');
+
+      expect(result).toBe(150); // Last message: 100 + 50
+    });
+
+    it('should handle cache tokens in last message', async () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      
+      const lines = [
+        '{"usage":{"input_tokens":200,"output_tokens":100}}', // older message
+        '{"message":{"usage":{"input_tokens":50,"output_tokens":25,"cache_read_input_tokens":75,"cache_creation_input_tokens":50}}}' // last message
+      ];
+
+      mockCreateAsyncIterator(lines);
+
+      const result = await getCurrentTokenCount('/test/session.jsonl');
+
+      expect(result).toBe(200); // Last message: 50 + 25 + 75 + 50
     });
   });
 

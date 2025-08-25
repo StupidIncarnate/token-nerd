@@ -1,6 +1,6 @@
 // Simplified terminal-based implementation for token analysis
 import { correlateOperations, Bundle, Operation } from './correlation-engine';
-import { getTokenCount, calculateCumulativeTotal, calculateConversationGrowth, calculateRemainingCapacity } from './token-calculator';
+import { getCurrentTokenCount, calculateCumulativeTotal, calculateRemainingCapacity } from './token-calculator';
 import * as readline from 'readline';
 
 type SortMode = 'time' | 'tokens' | 'operation';
@@ -137,7 +137,7 @@ class TokenAnalyzer {
     this.clearScreen();
 
     // Get session total from JSONL (not sum of individual operations)
-    const totalTokens = this.jsonlPath ? await getTokenCount(this.jsonlPath) : 0;
+    const totalTokens = this.jsonlPath ? await getCurrentTokenCount(this.jsonlPath) : 0;
     const flatItems = this.getFlatItems();
     
     // Pagination for long lists

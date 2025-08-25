@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as readline from 'readline';
 import { calculateTokenStatus } from './config.js';
-import { getTokenCount } from '../lib/token-calculator';
+import { getCurrentTokenCount } from '../lib/token-calculator';
 
 interface TokenUsage {
   input_tokens?: number;
@@ -35,7 +35,7 @@ interface TokenResult {
 }
 
 export async function getRealTokenCount(transcriptPath: string): Promise<TokenResult> {
-  const total = await getTokenCount(transcriptPath);
+  const total = await getCurrentTokenCount(transcriptPath);
   
   if (total === 0) {
     return { total: 0, input: 0, output: 0, cacheRead: 0, cacheCreation: 0, percentage: 0 };

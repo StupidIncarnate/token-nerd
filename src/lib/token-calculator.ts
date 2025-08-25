@@ -75,6 +75,54 @@ export async function getTokenCount(transcriptPath: string): Promise<number> {
 }
 
 /**
+ * Gets the current token count from the last message in JSONL transcript
+ * Used specifically for statusline to show current context window usage
+ */
+export async function getCurrentTokenCount(transcriptPath: string): Promise<number> {
+  if (!fs.existsSync(transcriptPath)) {
+    return 0;
+  }
+
+  let lastTotal = 0;
+
+  try {
+    const fileStream = fs.createReadStream(transcriptPath);
+    const rl = readline.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity
+    });
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      
+      try {
+        const msg: TranscriptMessage = JSON.parse(line);
+        
+        // Check both .usage and .message.usage (different message formats)
+        const usage = msg.usage || msg.message?.usage;
+        
+        if (usage) {
+          // Calculate total for this message - always use the most recent
+          lastTotal = calculateCumulativeTotal(usage);
+        }
+      } catch (e) {
+        // Skip malformed lines
+      }
+    }
+  } catch (error) {
+    // Fall back to file size estimate if parsing fails
+    try {
+      const stats = fs.statSync(transcriptPath);
+      return Math.round(stats.size / 100);
+    } catch (statError) {
+      return 0;
+    }
+  }
+
+  return lastTotal;
+}
+
+/**
  * Calculate cumulative total from usage data
  * Used by both getTokenCount and TUI for consistency
  */

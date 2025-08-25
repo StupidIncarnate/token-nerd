@@ -17,7 +17,8 @@ afterAll(() => {
 
 // Mock token calculator
 jest.mock('./token-calculator', () => ({
-  getTokenCount: jest.fn()
+  getTokenCount: jest.fn(),
+  getCurrentTokenCount: jest.fn()
 }));
 
 // Mock fs module
@@ -49,12 +50,13 @@ jest.mock('inquirer', () => ({
 }));
 
 import inquirer from 'inquirer';
-import { getTokenCount } from './token-calculator';
+import { getTokenCount, getCurrentTokenCount } from './token-calculator';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockPath = path as jest.Mocked<typeof path>;
 const mockInquirer = inquirer as jest.Mocked<typeof inquirer>;
 const mockGetTokenCount = getTokenCount as jest.MockedFunction<typeof getTokenCount>;
+const mockGetCurrentTokenCount = getCurrentTokenCount as jest.MockedFunction<typeof getCurrentTokenCount>;
 
 describe('session-tracker', () => {
   const mockHomeDir = '/home/testuser';
@@ -64,7 +66,7 @@ describe('session-tracker', () => {
     jest.clearAllMocks();
     mockHomedir.mockReturnValue(mockHomeDir);
     mockPath.join.mockImplementation((...parts) => parts.join('/'));
-    mockGetTokenCount.mockResolvedValue(100); // Default token count
+    mockGetCurrentTokenCount.mockResolvedValue(100); // Default token count
   });
 
   describe('listSessions', () => {
@@ -97,7 +99,7 @@ describe('session-tracker', () => {
         .mockReturnValueOnce({ mtime: mockDate, size: 15000 } as any);
 
       // Mock token counts for each session
-      mockGetTokenCount
+      mockGetCurrentTokenCount
         .mockResolvedValueOnce(100) // session1
         .mockResolvedValueOnce(50)  // session2 (active)
         .mockResolvedValueOnce(150); // session4
@@ -199,12 +201,12 @@ describe('session-tracker', () => {
         size: 12345 
       } as any);
 
-      mockGetTokenCount.mockResolvedValue(123);
+      mockGetCurrentTokenCount.mockResolvedValue(123);
 
       const sessions = await listSessions();
 
       expect(sessions[0].tokens).toBe(123);
-      expect(mockGetTokenCount).toHaveBeenCalledWith(expect.stringContaining('session.jsonl'));
+      expect(mockGetCurrentTokenCount).toHaveBeenCalledWith(expect.stringContaining('session.jsonl'));
     });
 
     it('should detect active sessions (modified < 5 minutes ago)', async () => {
@@ -315,7 +317,7 @@ describe('session-tracker', () => {
         .mockReturnValueOnce({ mtime: mockDate, size: 1000 } as any)
         .mockReturnValueOnce({ mtime: new Date(Date.now() - 1000), size: 2000 } as any);
 
-      mockGetTokenCount
+      mockGetCurrentTokenCount
         .mockResolvedValueOnce(10) // session1
         .mockResolvedValueOnce(20); // session2 (active)
 
@@ -358,7 +360,7 @@ describe('session-tracker', () => {
         .mockReturnValueOnce({ mtime: recentTime, size: 5000 } as any)
         .mockReturnValueOnce({ mtime: oldTime, size: 10000 } as any);
 
-      mockGetTokenCount
+      mockGetCurrentTokenCount
         .mockResolvedValueOnce(50)  // active123
         .mockResolvedValueOnce(100); // inactive456
 
@@ -384,7 +386,7 @@ describe('session-tracker', () => {
         size: 1234567 
       } as any);
 
-      mockGetTokenCount.mockResolvedValue(12346);
+      mockGetCurrentTokenCount.mockResolvedValue(12346);
       mockInquirer.prompt.mockResolvedValue({ sessionId: 'big-session' });
 
       await selectSession();
@@ -499,7 +501,7 @@ describe('session-tracker', () => {
         size: 0 
       } as any);
 
-      mockGetTokenCount.mockResolvedValue(0);
+      mockGetCurrentTokenCount.mockResolvedValue(0);
 
       const sessions = await listSessions();
 

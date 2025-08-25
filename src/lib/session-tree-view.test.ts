@@ -16,7 +16,8 @@ afterAll(() => {
 
 // Mock token calculator
 jest.mock('./token-calculator', () => ({
-  getTokenCount: jest.fn().mockResolvedValue(100)
+  getTokenCount: jest.fn().mockResolvedValue(100),
+  getCurrentTokenCount: jest.fn().mockResolvedValue(100)
 }));
 
 // Mock fs module
@@ -47,12 +48,13 @@ jest.mock('inquirer', () => ({
 }));
 
 import inquirer from 'inquirer';
-import { getTokenCount } from './token-calculator';
+import { getTokenCount, getCurrentTokenCount } from './token-calculator';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockPath = path as jest.Mocked<typeof path>;
 const mockInquirer = inquirer as jest.Mocked<typeof inquirer>;
 const mockGetTokenCount = getTokenCount as jest.MockedFunction<typeof getTokenCount>;
+const mockGetCurrentTokenCount = getCurrentTokenCount as jest.MockedFunction<typeof getCurrentTokenCount>;
 
 describe('SessionTreeView', () => {
   let treeView: SessionTreeView;
@@ -63,7 +65,7 @@ describe('SessionTreeView', () => {
     jest.clearAllMocks();
     
     // Setup default mock for getTokenCount
-    mockGetTokenCount.mockResolvedValue(100);
+    mockGetCurrentTokenCount.mockResolvedValue(100);
     
     // Setup mock implementations
     mockHomedir.mockReturnValue(mockHomeDir);
@@ -228,7 +230,7 @@ describe('SessionTreeView', () => {
       mockFs.existsSync.mockReturnValue(false);
       
       // Override getTokenCount to return 0 for non-existent files
-      mockGetTokenCount.mockResolvedValue(0);
+      mockGetCurrentTokenCount.mockResolvedValue(0);
       
       await treeView.initialize();
       
