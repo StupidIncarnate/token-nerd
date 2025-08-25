@@ -299,6 +299,7 @@ class TokenAnalyzer {
     console.log(`└${'─'.repeat(78)}┘\n`);
     
     console.log(`Bundle ID: ${bundle.id}`);
+    console.log(`Session ID: ${this.sessionId}`);
     console.log(`Total Tokens: ${bundle.totalTokens.toLocaleString()}`);
     console.log(`Time: ${new Date(bundle.timestamp).toLocaleTimeString()}`);
     console.log('');
@@ -314,18 +315,34 @@ class TokenAnalyzer {
         allLines.push(`│ ⚠️ Hidden System Context`);
         allLines.push(`│ Size: ${(operation.responseSize / 1024).toFixed(1)}KB`);
         allLines.push(`│ Estimated Impact: ~${operation.tokens.toLocaleString()} tokens`);
+        allLines.push(`│ Timestamp: ${new Date(operation.timestamp).toLocaleString()}`);
+        allLines.push(`│ Session ID: ${operation.session_id}`);
       } else if (operation.tool === 'ToolResponse') {
         allLines.push(`│ Size: ${(operation.responseSize / 1024).toFixed(1)}KB`);
         allLines.push(`│ Estimated Tokens: ~${operation.tokens.toLocaleString()}`);
         allLines.push(`│ Impact: This content will be processed in the next Assistant message`);
+        allLines.push(`│ Timestamp: ${new Date(operation.timestamp).toLocaleString()}`);
+        allLines.push(`│ Session ID: ${operation.session_id}`);
       } else if (operation.tool === 'User') {
         allLines.push(`│ Message Length: ${operation.responseSize} chars`);
         allLines.push(`│ Estimated Tokens: ~${operation.tokens.toLocaleString()}`);
         if (operation.timeGap && operation.timeGap > 300) {
           allLines.push(`│ ⚠️ Time Gap: ${Math.round(operation.timeGap/60)} minutes (cache may expire)`);
         }
+        allLines.push(`│ Timestamp: ${new Date(operation.timestamp).toLocaleString()}`);
+        allLines.push(`│ Session ID: ${operation.session_id}`);
       } else {
         allLines.push(`│ Tokens: ${operation.tokens.toLocaleString()} (${operation.allocation})`);
+        
+        // Show operation metadata
+        if (operation.message_id) {
+          allLines.push(`│ Message ID: ${operation.message_id}`);
+        }
+        if (operation.sequence !== undefined) {
+          allLines.push(`│ Sequence: ${operation.sequence}`);
+        }
+        allLines.push(`│ Timestamp: ${new Date(operation.timestamp).toLocaleString()}`);
+        allLines.push(`│ Session ID: ${operation.session_id}`);
         
         // Show context growth vs generation split
         if (operation.contextGrowth > 0 || operation.generationCost > 0) {
