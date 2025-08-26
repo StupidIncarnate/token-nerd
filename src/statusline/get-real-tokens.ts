@@ -87,7 +87,7 @@ export async function getRealTokenCount(transcriptPath: string): Promise<TokenRe
 }
 
 // Only run main() if this file is executed directly (not imported)
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (require.main === module) {
   // Main execution
   async function main() {
     const transcriptPath = process.argv[2];

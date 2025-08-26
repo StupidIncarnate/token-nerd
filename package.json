@@ -2,13 +2,21 @@
   "name": "token-nerd",
   "version": "0.1.0",
   "description": "Comprehensive token monitoring and analysis tools for Claude Code sessions",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "bin": {
-    "token-nerd": "./src/cli/index.ts"
+    "token-nerd": "./dist/cli/index.js"
   },
+  "files": [
+    "dist/",
+    "postinstall.ts",
+    "preuninstall.ts",
+    "README.md"
+  ],
   "scripts": {
-    "typecheck": "npx tsc --noEmit",
+    "build": "tsc",
+    "typecheck": "npx tsc --noEmit", 
     "test": "jest",
+    "prepublishOnly": "npm run test && npm run build",
     "postinstall": "npx tsx postinstall.ts",
     "preuninstall": "npx tsx preuninstall.ts"
   },
@@ -32,13 +40,29 @@
     "tsx": "^4.0.0",
     "typescript": "^5.2.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/StupidIncarnate/token-nerd.git"
+  },
+  "homepage": "https://github.com/StupidIncarnate/token-nerd#readme",
+  "bugs": {
+    "url": "https://github.com/StupidIncarnate/token-nerd/issues"
+  },
   "keywords": [
     "claude",
+    "claude-code",
     "tokens",
-    "monitoring",
+    "token-monitoring",
     "analysis",
-    "claude-code"
+    "cli",
+    "tui",
+    "terminal",
+    "debugging",
+    "mcp"
   ],
-  "author": "",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "StupidIncarnate",
   "license": "MIT"
 }
