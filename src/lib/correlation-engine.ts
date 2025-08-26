@@ -1,9 +1,7 @@
 import { createClient } from 'redis';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { parseJsonl, JsonlMessage } from './jsonl-utils';
-import { estimateTokensFromContent } from './token-calculator';
 import { getSnapshotForSession } from './stats-collector';
 
 export { JsonlMessage };
@@ -17,6 +15,7 @@ export interface Operation {
   session_id: string;
   message_id?: string;
   sequence?: number;
+  tool_use_id?: string;  // Links tool requests to responses
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -213,6 +212,7 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
   
   // Process ALL messages to understand the full conversation flow
   const bundles: Bundle[] = [];
+  const processedMessageIds = new Set<string>();  // Track processed message IDs to avoid duplicates
   
   // Add context startup cost as first bundle if available
   if (contextSnapshot && contextSnapshot.stats) {
@@ -263,6 +263,12 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
     
     if (isSystem) {
       // System message - often contains hidden prompts
+      // Extract toolUseID if present
+      let toolUseId: string | undefined;
+      if (msg.content && typeof msg.content === 'object' && msg.content.toolUseID) {
+        toolUseId = msg.content.toolUseID;
+      }
+      
       const systemOp: Operation = {
         tool: 'System',
         params: {},
@@ -271,6 +277,7 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         timestamp: msg.timestamp,
         session_id: sessionId,
         message_id: msg.id,
+        tool_use_id: toolUseId,
         tokens: Math.ceil(JSON.stringify(msg.content).length / 4),
         generationCost: 0,
         contextGrowth: 0,
@@ -304,7 +311,7 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         contextGrowth: 0, // Will be counted in next assistant message
         timeGap,
         allocation: 'estimated',
-        details: userText.substring(0, 50) + (userText.length > 50 ? '...' : '')
+        details: userText.replace(/\s+/g, ' ').substring(0, 50) + (userText.length > 50 ? '...' : '')
       };
       
       bundles.push({
@@ -327,6 +334,7 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         timestamp: msg.timestamp,
         session_id: sessionId,
         message_id: msg.id,
+        tool_use_id: toolResult?.tool_use_id,
         tokens: estimatedTokens,
         generationCost: 0,
         contextGrowth: 0,  // Don't count estimated values in context growth
@@ -341,6 +349,14 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         totalTokens: estimatedTokens
       });
     } else if (isAssistant && msg.usage) {
+      // Skip duplicate message IDs (streaming chunks of same message)
+      if (msg.id && processedMessageIds.has(msg.id)) {
+        continue;
+      }
+      if (msg.id) {
+        processedMessageIds.add(msg.id);
+      }
+      
       // Assistant message - process with all metrics
       const contextGrowth = msg.usage?.cache_creation_input_tokens || 0;
       const generationCost = msg.usage?.output_tokens || 0;
@@ -369,13 +385,20 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
       let params = {};
       
       if (hasToolUse) {
-        const toolUse = messageContent.find((c: any) => c.type === 'tool_use');
-        if (toolUse) {
-          // Keep as Assistant but note the tool use in details
+        const toolUses = messageContent.filter((c: any) => c.type === 'tool_use');
+        if (toolUses.length === 1) {
+          // Single tool call
+          const toolUse = toolUses[0];
           const toolName = toolUse.name || 'Unknown';
           params = toolUse.input || {};
           const toolDetails = formatOperationDetails(toolName, params);
-          details = `calls ${toolName}: ${toolDetails}`;
+          details = `${toolName}: ${toolDetails}`;
+          if (timeGap > 300) {
+            details = `⚠️ ${details} (cache expired)`;
+          }
+        } else {
+          // Multiple tool calls
+          details = `${toolUses.length} tool calls`;
           if (timeGap > 300) {
             details = `⚠️ ${details} (cache expired)`;
           }
@@ -402,6 +425,7 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         details
       };
       
+      
       bundles.push({
         id: msg.id,
         timestamp: msg.timestamp,
@@ -411,5 +435,54 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
     }
   }
   
+  // Post-process to enrich ToolResponse details with filenames from linked operations
+  for (const bundle of bundles) {
+    for (const op of bundle.operations) {
+      if (op.tool === 'ToolResponse' && op.tool_use_id) {
+        // Find the assistant message that created this tool_use_id
+        const linkedOps = getLinkedOperations(bundles, op.tool_use_id);
+        const assistantOp = linkedOps.find(linkedOp => linkedOp.tool === 'Assistant');
+        
+        if (assistantOp && assistantOp.response && Array.isArray(assistantOp.response)) {
+          const toolUse = assistantOp.response.find((c: any) => 
+            c.type === 'tool_use' && c.id === op.tool_use_id
+          );
+          
+          if (toolUse) {
+            const filename = formatOperationDetails(toolUse.name, toolUse.input);
+            op.details = filename; // Override the size details with filename
+          }
+        }
+      }
+    }
+  }
+  
   return bundles.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+// Find all operations linked by tool_use_id
+export function getLinkedOperations(bundles: Bundle[], targetToolUseId: string): Operation[] {
+  const linked: Operation[] = [];
+  
+  for (const bundle of bundles) {
+    for (const op of bundle.operations) {
+      // Find assistant messages that contain this tool_use_id
+      if (op.tool === 'Assistant' && op.response) {
+        const messageContent = Array.isArray(op.response) ? op.response : [];
+        const hasTargetToolUse = messageContent.some((c: any) => 
+          c.type === 'tool_use' && c.id === targetToolUseId
+        );
+        if (hasTargetToolUse) {
+          linked.push(op);
+        }
+      }
+      
+      // Find tool responses and system messages with matching tool_use_id
+      if (op.tool_use_id === targetToolUseId) {
+        linked.push(op);
+      }
+    }
+  }
+  
+  return linked.sort((a, b) => a.timestamp - b.timestamp);
 }

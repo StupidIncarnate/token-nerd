@@ -1,4 +1,4 @@
-import { correlateOperations, Operation, Bundle, JsonlMessage, resetRedisClient, getHookOperations } from './correlation-engine';
+import { correlateOperations, Operation, Bundle, JsonlMessage, resetRedisClient, getHookOperations, getLinkedOperations } from './correlation-engine';
 import { createClient } from 'redis';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -464,7 +464,7 @@ describe('correlation-engine', () => {
       expect(assistantOp?.ephemeral5m).toBe(300);
       expect(assistantOp?.ephemeral1h).toBe(500);
       expect(assistantOp?.cacheEfficiency).toBeCloseTo(46.67, 2); // 700/(800+700)*100
-      expect(assistantOp?.details).toContain('calls Read: file.ts');
+      expect(assistantOp?.details).toContain('Read: file.ts');
     });
 
     it('should add cache expiration warnings for time gaps', async () => {
@@ -762,6 +762,175 @@ describe('correlation-engine', () => {
       
       // Should return empty because no JSONL provided
       expect(result).toHaveLength(0);
+    });
+  });
+
+  describe('getLinkedOperations', () => {
+    it('should find operations linked by tool_use_id', () => {
+      const toolUseId = 'tool-123';
+      const mockBundles: Bundle[] = [
+        {
+          id: 'bundle-1',
+          timestamp: 1000,
+          operations: [{
+            tool: 'Assistant',
+            params: {},
+            response: [{
+              type: 'tool_use',
+              id: toolUseId,
+              name: 'Read',
+              input: { file_path: '/test/file.ts' }
+            }],
+            responseSize: 100,
+            timestamp: 1000,
+            session_id: 'test',
+            tokens: 50,
+            contextGrowth: 0,
+            generationCost: 50,
+            allocation: 'exact' as const,
+            details: 'message'
+          }],
+          totalTokens: 50
+        },
+        {
+          id: 'bundle-2',
+          timestamp: 1100,
+          operations: [{
+            tool: 'ToolResponse',
+            params: {},
+            response: 'file content',
+            responseSize: 200,
+            timestamp: 1100,
+            session_id: 'test',
+            tool_use_id: toolUseId,
+            tokens: 75,
+            contextGrowth: 0,
+            generationCost: 0,
+            allocation: 'estimated' as const,
+            details: '0.2KB → ~54 est'
+          }],
+          totalTokens: 75
+        },
+        {
+          id: 'bundle-3',
+          timestamp: 1200,
+          operations: [{
+            tool: 'System',
+            params: {},
+            response: 'tool execution completed',
+            responseSize: 30,
+            timestamp: 1200,
+            session_id: 'test',
+            tool_use_id: toolUseId,
+            tokens: 10,
+            contextGrowth: 0,
+            generationCost: 0,
+            allocation: 'estimated' as const,
+            details: 'Hidden system prompt/context'
+          }],
+          totalTokens: 10
+        }
+      ];
+
+      const result = getLinkedOperations(mockBundles, toolUseId);
+
+      expect(result).toHaveLength(3);
+      expect(result[0].tool).toBe('Assistant');
+      expect(result[1].tool).toBe('ToolResponse');
+      expect(result[2].tool).toBe('System');
+      
+      // Should be sorted by timestamp
+      expect(result[0].timestamp).toBe(1000);
+      expect(result[1].timestamp).toBe(1100);
+      expect(result[2].timestamp).toBe(1200);
+    });
+
+    it('should return empty array when no matching tool_use_id found', () => {
+      const mockBundles: Bundle[] = [
+        {
+          id: 'bundle-1',
+          timestamp: 1000,
+          operations: [{
+            tool: 'Assistant',
+            params: {},
+            response: 'some response',
+            responseSize: 100,
+            timestamp: 1000,
+            session_id: 'test',
+            tokens: 50,
+            contextGrowth: 0,
+            generationCost: 50,
+            allocation: 'exact' as const,
+            details: 'message'
+          }],
+          totalTokens: 50
+        }
+      ];
+
+      const result = getLinkedOperations(mockBundles, 'nonexistent-tool-id');
+
+      expect(result).toHaveLength(0);
+    });
+
+    it('should handle assistant messages with multiple tool uses', () => {
+      const toolUseId1 = 'tool-123';
+      const toolUseId2 = 'tool-456';
+      const mockBundles: Bundle[] = [
+        {
+          id: 'bundle-1',
+          timestamp: 1000,
+          operations: [{
+            tool: 'Assistant',
+            params: {},
+            response: [{
+              type: 'tool_use',
+              id: toolUseId1,
+              name: 'Read',
+              input: { file_path: '/test/file1.ts' }
+            }, {
+              type: 'tool_use',
+              id: toolUseId2,
+              name: 'Read',
+              input: { file_path: '/test/file2.ts' }
+            }],
+            responseSize: 100,
+            timestamp: 1000,
+            session_id: 'test',
+            tokens: 50,
+            contextGrowth: 0,
+            generationCost: 50,
+            allocation: 'exact' as const,
+            details: '2 tool calls'
+          }],
+          totalTokens: 50
+        },
+        {
+          id: 'bundle-2',
+          timestamp: 1100,
+          operations: [{
+            tool: 'ToolResponse',
+            params: {},
+            response: 'file1 content',
+            responseSize: 200,
+            timestamp: 1100,
+            session_id: 'test',
+            tool_use_id: toolUseId1,
+            tokens: 75,
+            contextGrowth: 0,
+            generationCost: 0,
+            allocation: 'estimated' as const,
+            details: '0.2KB → ~54 est'
+          }],
+          totalTokens: 75
+        }
+      ];
+
+      const result = getLinkedOperations(mockBundles, toolUseId1);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].tool).toBe('Assistant');
+      expect(result[1].tool).toBe('ToolResponse');
+      expect(result[1].tool_use_id).toBe(toolUseId1);
     });
   });
 });

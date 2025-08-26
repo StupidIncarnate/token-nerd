@@ -1,9 +1,10 @@
 import { launchTUI } from './tui-components';
-import { correlateOperations } from './correlation-engine';
+import { correlateOperations, getLinkedOperations } from './correlation-engine';
 
 // Mock correlation engine
 jest.mock('./correlation-engine', () => ({
-  correlateOperations: jest.fn()
+  correlateOperations: jest.fn(),
+  getLinkedOperations: jest.fn()
 }));
 
 // Mock readline
@@ -290,6 +291,192 @@ describe('tui-components', () => {
       
       // Should display pagination info in console output
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Page 1/2'));
+    });
+
+    it('should handle ToolResponse bundles in hierarchical display', async () => {
+      const mockBundles = [
+        {
+          id: 'assistant-1',
+          timestamp: 1000,
+          operations: [{
+            tool: 'Assistant',
+            params: {},
+            response: [{
+              type: 'tool_use',
+              id: 'tool-123',
+              name: 'Read',
+              input: { file_path: '/test/file.ts' }
+            }],
+            responseSize: 100,
+            timestamp: 1000,
+            session_id: 'test',
+            tokens: 50,
+            contextGrowth: 0,
+            generationCost: 50,
+            allocation: 'exact' as const,
+            details: 'Read: file.ts'
+          }],
+          totalTokens: 50
+        },
+        {
+          id: 'tool-response-1',
+          timestamp: 1100,
+          operations: [{
+            tool: 'ToolResponse',
+            params: {},
+            response: 'file content here',
+            responseSize: 1000,
+            timestamp: 1100,
+            session_id: 'test',
+            tool_use_id: 'tool-123',
+            tokens: 270,
+            contextGrowth: 0,
+            generationCost: 0,
+            allocation: 'estimated' as const,
+            details: '1.0KB → ~270 est'
+          }],
+          totalTokens: 270
+        }
+      ];
+      
+      mockedCorrelateOperations.mockResolvedValue(mockBundles);
+      
+      mockStdin.on.mockImplementation((event: string, callback: Function) => {
+        if (event === 'data') {
+          setTimeout(() => callback(Buffer.from('q')), 0);
+        }
+      });
+      
+      try {
+        const tuiPromise = launchTUI('test-session');
+        jest.runAllTimers();
+        await tuiPromise;
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called with "0"');
+      }
+      
+      // Should show the assistant message and the child ToolResponse
+      // The TUI should group these together hierarchically
+      expect(mockedCorrelateOperations).toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Read: file.ts'));
+    });
+
+    it('should display context window changes correctly', async () => {
+      const mockBundles = [
+        {
+          id: 'bundle-1',
+          timestamp: 1000,
+          operations: [{
+            tool: 'User',
+            params: {},
+            response: 'Hello',
+            responseSize: 20,
+            timestamp: 1000,
+            session_id: 'test',
+            tokens: 5,
+            contextGrowth: 0,
+            generationCost: 0,
+            allocation: 'estimated' as const,
+            details: 'Hello'
+          }],
+          totalTokens: 5
+        },
+        {
+          id: 'bundle-2',
+          timestamp: 2000,
+          operations: [{
+            tool: 'Assistant',
+            params: {},
+            response: 'Hi there!',
+            responseSize: 50,
+            timestamp: 2000,
+            session_id: 'test',
+            tokens: 100,
+            contextGrowth: 80,
+            generationCost: 20,
+            allocation: 'exact' as const,
+            details: 'message',
+            usage: {
+              input_tokens: 25,
+              output_tokens: 20,
+              cache_creation_input_tokens: 80
+            }
+          }],
+          totalTokens: 100
+        }
+      ];
+      
+      mockedCorrelateOperations.mockResolvedValue(mockBundles);
+      
+      mockStdin.on.mockImplementation((event: string, callback: Function) => {
+        if (event === 'data') {
+          setTimeout(() => callback(Buffer.from('q')), 0);
+        }
+      });
+      
+      try {
+        const tuiPromise = launchTUI('test-session');
+        jest.runAllTimers();
+        await tuiPromise;
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called with "0"');
+      }
+      
+      // Should show context deltas and totals with running total calculation
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Total:'));
+      expect(mockedCorrelateOperations).toHaveBeenCalled();
+    });
+
+    it('should handle child item indentation in display', async () => {
+      const mockBundles = [
+        {
+          id: 'bundle-1',
+          timestamp: 1000,
+          operations: [{
+            tool: 'Assistant',
+            params: {},
+            response: [{
+              type: 'tool_use',
+              id: 'tool-123',
+              name: 'Bash',
+              input: { command: 'ls -la' }
+            }, {
+              type: 'tool_use', 
+              id: 'tool-456',
+              name: 'Read',
+              input: { file_path: '/test/file.ts' }
+            }],
+            responseSize: 100,
+            timestamp: 1000,
+            session_id: 'test',
+            tokens: 50,
+            contextGrowth: 0,
+            generationCost: 50,
+            allocation: 'exact' as const,
+            details: '2 tool calls'
+          }],
+          totalTokens: 50
+        }
+      ];
+      
+      mockedCorrelateOperations.mockResolvedValue(mockBundles);
+      
+      mockStdin.on.mockImplementation((event: string, callback: Function) => {
+        if (event === 'data') {
+          setTimeout(() => callback(Buffer.from('q')), 0);
+        }
+      });
+      
+      try {
+        const tuiPromise = launchTUI('test-session');
+        jest.runAllTimers();
+        await tuiPromise;
+      } catch (error) {
+        expect((error as Error).message).toBe('process.exit called with "0"');
+      }
+      
+      // Should display the bundle with multiple tool calls
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('2 tool calls'));
     });
   });
 });

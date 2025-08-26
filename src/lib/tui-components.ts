@@ -1,5 +1,5 @@
 // Simplified terminal-based implementation for token analysis
-import { correlateOperations, Bundle, Operation } from './correlation-engine';
+import { correlateOperations, Bundle, Operation, getLinkedOperations } from './correlation-engine';
 import { getCurrentTokenCount, calculateCumulativeTotal, calculateRemainingCapacity } from './token-calculator';
 import * as readline from 'readline';
 
@@ -105,16 +105,72 @@ class TokenAnalyzer {
     });
   }
 
-  private getFlatItems(): Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number }> {
-    const items: Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number }> = [];
+  private getFlatItems(): Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number; isChild?: boolean }> {
+    const items: Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number; isChild?: boolean }> = [];
     const sortedBundles = this.getSortedBundles();
     
+    // Track which ToolResponse bundles have been shown as children
+    const processedToolResponses = new Set<string>();
+    
     sortedBundles.forEach((bundle, bundleIndex) => {
+      const op = bundle.operations[0];
+      
+      // Skip ToolResponse bundles that should be shown as children
+      if (op.tool === 'ToolResponse' && processedToolResponses.has(bundle.id)) {
+        return;
+      }
+      
+      // Skip System messages that have a tool_use_id (they'll show in detail view of related tool)
+      if (op.tool === 'System' && op.tool_use_id) {
+        return;
+      }
+      
       items.push({ type: 'bundle', bundle, index: bundleIndex });
       
+      // If this is an Assistant message with tool calls, find related ToolResponse bundles
+      if (op.tool === 'Assistant' && op.response && Array.isArray(op.response)) {
+        const toolUses = op.response.filter((c: any) => c.type === 'tool_use');
+        
+        if (toolUses.length > 0) {
+          // Find ToolResponse bundles that match these tool_use_ids
+          const relatedResponses: Bundle[] = [];
+          
+          for (const toolUse of toolUses) {
+            const responseBundle = sortedBundles.find(b => {
+              const responseOp = b.operations[0];
+              return responseOp.tool === 'ToolResponse' && responseOp.tool_use_id === toolUse.id;
+            });
+            
+            if (responseBundle) {
+              relatedResponses.push(responseBundle);
+              processedToolResponses.add(responseBundle.id);
+            }
+          }
+          
+          // Add related responses as children (sorted by timestamp)
+          relatedResponses
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .forEach((responseBundle, childIndex) => {
+              items.push({ 
+                type: 'bundle', 
+                bundle: responseBundle, 
+                index: bundleIndex * 100 + childIndex + 1,
+                isChild: true
+              });
+            });
+        }
+      }
+      
+      // Handle expanded view for multi-operation bundles
       if (this.state.expanded.has(bundle.id) && bundle.operations.length > 1) {
         bundle.operations.forEach((operation, opIndex) => {
-          items.push({ type: 'operation', bundle, operation, index: bundleIndex * 100 + opIndex });
+          items.push({ 
+            type: 'operation', 
+            bundle, 
+            operation, 
+            index: bundleIndex * 1000 + opIndex,
+            isChild: true
+          });
         });
       }
     });
@@ -149,10 +205,15 @@ class TokenAnalyzer {
 
     // Header
     const sortDirection = this.state.sortAscending ? '↑' : '↓';
-    console.log(`┌${'─'.repeat(78)}┐`);
-    console.log(`│ Session: ${this.sessionId.slice(0, 8)} | Total: ${totalTokens.toLocaleString()} tokens | Sort: ${this.state.sortMode.toUpperCase()} ${sortDirection}`);
-    console.log(`│ Page ${currentPage + 1}/${Math.ceil(flatItems.length / itemsPerPage)} | Items ${startIndex + 1}-${endIndex} of ${flatItems.length}`);
-    console.log(`└${'─'.repeat(78)}┘\n`);
+    console.log(`┌${'─'.repeat(98)}┐`);
+    console.log(`│ Session: ${this.sessionId.slice(0, 8)} | Total: ${totalTokens.toLocaleString()} tokens | Sort: ${this.state.sortMode.toUpperCase()} ${sortDirection}`.padEnd(99) + '│');
+    console.log(`│ Page ${currentPage + 1}/${Math.ceil(flatItems.length / itemsPerPage)} | Items ${startIndex + 1}-${endIndex} of ${flatItems.length}`.padEnd(99) + '│');
+    console.log(`└${'─'.repeat(98)}┘`);
+    
+    // Column headers
+    console.log('');
+    console.log('   Time     [ Context ] | Token Impact              | Operation & Details');
+    console.log('─'.repeat(100));
 
     // Calculate actual context window deltas (what each message adds)
     const contextTotals = new Map<string, number>();
@@ -166,15 +227,16 @@ class TokenAnalyzer {
       let contextDelta = 0;
       
       if (op.usage && op.allocation === 'exact') {
-        // Get cumulative total for this message
+        // For running total, use full cumulative calculation for statusline consistency
         const currentTotal = calculateCumulativeTotal(op.usage);
         
-        // Calculate actual context delta (what this message added)
+        // Calculate REAL context window delta (difference from previous total)
         contextDelta = currentTotal - previousTotal;
-        previousTotal = currentTotal;
+        
         runningTotal = currentTotal;
+        previousTotal = currentTotal;
       }
-      // For messages without usage (User messages), use the last known total
+      // For messages without usage (User messages), keep the last known total
       
       // Store both values for display
       contextTotals.set(b.id, runningTotal);
@@ -195,10 +257,28 @@ class TokenAnalyzer {
         
         const timeStr = new Date(bundle.timestamp).toLocaleTimeString();
         const contextTotal = contextTotals.get(bundle.id) || 0;
-        const contextStr = contextTotal.toLocaleString('en-US', { 
-          minimumIntegerDigits: 6, 
-          useGrouping: true 
-        }).padStart(8);
+        
+        // Compare with previous line's context total to decide whether to show actual number or [---,---]
+        let contextStr: string;
+        if (i > 0) {
+          const prevItem = visibleItems[i - 1];
+          const prevContextTotal = contextTotals.get(prevItem.bundle.id) || 0;
+          
+          if (contextTotal === prevContextTotal) {
+            contextStr = '---,---'.padStart(8);
+          } else {
+            contextStr = contextTotal.toLocaleString('en-US', { 
+              minimumIntegerDigits: 6, 
+              useGrouping: true 
+            }).padStart(8);
+          }
+        } else {
+          // First item always shows the actual number
+          contextStr = contextTotal.toLocaleString('en-US', { 
+            minimumIntegerDigits: 6, 
+            useGrouping: true 
+          }).padStart(8);
+        }
         
         const contextDelta = contextDeltas.get(bundle.id) || 0;
         const capacity = calculateRemainingCapacity(contextTotal);
@@ -231,19 +311,26 @@ class TokenAnalyzer {
           
           // Format tokens based on operation type - show actual context delta
           if (op.tool === 'ToolResponse') {
-            // Show size for tool responses
-            tokensDisplay = `[${op.details}]`;
+            // Show size for tool responses - use improved tokenization estimate
+            const sizeKB = (op.responseSize / 1024).toFixed(1);
+            // Better estimate: JSON/code ~= 3.5 chars/token, plain text ~= 4 chars/token
+            // Use 3.7 as average for mixed content
+            const estimatedTokens = Math.ceil(op.responseSize / 3.7);
+            tokensDisplay = `[${sizeKB}KB → ~${estimatedTokens.toLocaleString()} est]`;
           } else if (op.tool === 'User') {
             // Show estimated tokens for user messages
             tokensDisplay = `~${op.tokens} est`;
           } else if (contextDelta > 0) {
             // Show actual context window delta (what this message added)
-            tokensDisplay = `+${contextDelta.toLocaleString()} context`;
+            tokensDisplay = `+${contextDelta.toLocaleString()} actual`;
             if (op.generationCost > 0) {
-              tokensDisplay += ` (${op.generationCost.toLocaleString()} gen)`;
+              tokensDisplay += ` (${op.generationCost.toLocaleString()} out)`;
             }
+            
+            // TODO: Add correlation with preceding ToolResponse estimates
+            // This would show: "+4,343 actual (~4,200 est)" to show estimate vs reality
           } else if (op.generationCost > 0) {
-            tokensDisplay = `${op.generationCost.toLocaleString()} gen`;
+            tokensDisplay = `${op.generationCost.toLocaleString()} tokens`;
           } else {
             tokensDisplay = `${op.tokens.toLocaleString()} tokens`;
           }
@@ -257,7 +344,11 @@ class TokenAnalyzer {
         const capacityWarning = capacity.isNearLimit ? ' ⚠️' : '';
         const remainingStr = `${Math.round(capacity.remaining/1000)}k left`;
         
-        const line = `${prefix}${timeStr} [${contextStr}] | ${tokensDisplay.padEnd(25)} | ${description}${capacityWarning}`;
+        // Handle indentation for child items - indent the token display and description
+        const tokensDisplayWithIndent = item.isChild ? `  ${tokensDisplay}` : tokensDisplay;
+        const descriptionWithIndent = item.isChild ? `  ${description}` : description;
+        
+        const line = `${prefix}${timeStr} [${contextStr}] | ${tokensDisplayWithIndent.padEnd(27)} | ${descriptionWithIndent}${capacityWarning}`;
         if (isSelected) {
           console.log(`\x1b[44m${line.padEnd(100)}\x1b[0m`); // Blue background
         } else {
@@ -294,14 +385,26 @@ class TokenAnalyzer {
     
     this.clearScreen();
     
+    // Check if this is a linked tool operations bundle
+    const isLinkedBundle = bundle.id.startsWith('linked-');
+    const headerTitle = isLinkedBundle 
+      ? `LINKED TOOL OPERATIONS - ${bundle.operations.length} Operations`
+      : `BUNDLE DETAILS - ${bundle.operations.length} Operations`;
+    
     console.log(`┌${'─'.repeat(78)}┐`);
-    console.log(`│ BUNDLE DETAILS - ${bundle.operations.length} Operations`);
+    console.log(`│ ${headerTitle}`);
     console.log(`└${'─'.repeat(78)}┘\n`);
     
     console.log(`Bundle ID: ${bundle.id}`);
     console.log(`Session ID: ${this.sessionId}`);
     console.log(`Total Tokens: ${bundle.totalTokens.toLocaleString()}`);
     console.log(`Time: ${new Date(bundle.timestamp).toLocaleTimeString()}`);
+    
+    if (isLinkedBundle) {
+      const toolUseId = bundle.id.replace('linked-', '');
+      console.log(`Tool Use ID: ${toolUseId}`);
+    }
+    
     console.log('');
     
     // Build combined content with headers
@@ -344,11 +447,11 @@ class TokenAnalyzer {
         allLines.push(`│ Timestamp: ${new Date(operation.timestamp).toLocaleString()}`);
         allLines.push(`│ Session ID: ${operation.session_id}`);
         
-        // Show context growth vs generation split
+        // Show token breakdown
         if (operation.contextGrowth > 0 || operation.generationCost > 0) {
           allLines.push(`│ Breakdown:`);
           if (operation.contextGrowth > 0) {
-            allLines.push(`│   Context Growth: +${operation.contextGrowth.toLocaleString()} (new content added)`);
+            allLines.push(`│   Cache Creation: ${operation.contextGrowth.toLocaleString()} (from cache_creation_input_tokens)`);
           }
           if (operation.generationCost > 0) {
             allLines.push(`│   Generation Cost: ${operation.generationCost.toLocaleString()} (output tokens)`);
@@ -496,7 +599,27 @@ class TokenAnalyzer {
       case '\r': // Enter
         if (flatItems.length > 0) {
           const item = flatItems[this.state.selectedIndex];
-          this.state.viewingDetails = item.bundle;
+          
+          // If this is a ToolResponse, show all linked operations
+          if (item.bundle.operations.length === 1 && item.bundle.operations[0].tool === 'ToolResponse') {
+            const toolResponseOp = item.bundle.operations[0];
+            if (toolResponseOp.tool_use_id) {
+              // Create a virtual bundle with all linked operations
+              const linkedOps = getLinkedOperations(this.state.bundles, toolResponseOp.tool_use_id);
+              const linkedBundle: Bundle = {
+                id: `linked-${toolResponseOp.tool_use_id}`,
+                timestamp: Math.min(...linkedOps.map(op => op.timestamp)),
+                operations: linkedOps,
+                totalTokens: linkedOps.reduce((sum, op) => sum + op.tokens, 0)
+              };
+              this.state.viewingDetails = linkedBundle;
+            } else {
+              this.state.viewingDetails = item.bundle;
+            }
+          } else {
+            this.state.viewingDetails = item.bundle;
+          }
+          
           this.state.detailScrollOffset = 0;
         }
         break;
