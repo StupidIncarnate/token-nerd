@@ -1,4 +1,4 @@
-# Token Nerd
+# Token Nerd - The 🐿️ who counts every nut
 
 [![npm version](https://badge.fury.io/js/token-nerd.svg)](https://www.npmjs.com/package/token-nerd)
 [![Node.js](https://img.shields.io/node/v/token-nerd.svg)](https://nodejs.org/)
@@ -6,23 +6,23 @@
 
 > **Debug Claude Code context window issues with precision**
 
-Token Nerd lets you see on a message-by-message basis how Claude's context window is filling up, so you can troubleshoot why during certain sessions Claude was only able to touch one file before needing to compact. 
+Token Nerd lets you see on a message-by-message basis how Claude's context window fills up, so you can troubleshoot why Claude could only touch one or two files before needing to compact in any given session.
 
 ## How It Works
 
-1. **Automatic Installation** - `npm install -g token-nerd` sets up everything via postinstall script
-2. **MCP Server** - Starts with Claude Code, manages Redis lifecycle
-3. **Hooks** - Capture every tool operation in `~/.claude/settings.json`
-4. **Statusline** - Shows real token counts from JSONL transcript parsing
-5. **Interactive TUI** - Lets you correlate context window spikes and scaling window fills
+Install once, restart Claude Code, and you get:
+- **Real token counter** in your statusline (`🐿️ 105,862 (68%)` so you know when auto-compact is coming)
+- **Operation tracking** - every tool call captures the information you need to figure out why your context window is suddenly fat and gorged
+- **Interactive analysis** - drill down into any session to find outputs that are total token hogs 
 
-The installation sets up:
-- **MCP server** that automatically manages Redis for data storage
-- **Tool hooks** that capture every Claude operation with precise timing
-- **Statusline integration** showing real token counts (not estimates)
-- **Interactive analysis tools** for session troubleshooting
+Everything runs automatically in the background. When Claude feels slow or hits limits unexpectedly, run `token-nerd` to see exactly what happened.
+ 
+### Nitty-Gritty Pieces
+- An MCP server to record data across all your Claude sessions (No need to enable on a per project basis)
+- Pre/Post Hooks to watch all tool requests and store output into Redis
+- A statusline to get early heads up of a gosh darn nut thief 
+  - If you already have a statusline setup, the install will just tack onto that.
 
-After installation, restart Claude Code and it begins capturing data immediately. Run `token-nerd` anytime to analyze your sessions. 
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ npm install -g token-nerd
 token-nerd  # Interactive analysis
 ```
 
-## What You'll See when you run token-nerd
+## What you'll see when you run token-nerd and drill into sessions
 
 Interactive terminal UI with live sorting and hierarchical view:
 
@@ -53,11 +53,15 @@ Interactive terminal UI with live sorting and hierarchical view:
 
    Time     [ Context ] | Token Impact              | Operation & Details
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-   10:32:15 [015,234] | +4,343 actual (120 out) | 🤖 Assistant: Read: large-file.ts
-   10:32:16 [---,---] | [12.5KB → ~3,378 est]   |   📥 ToolResponse: large-file.ts
-   10:32:45 [019,577] | +2,890 actual (85 out)  | 🤖 Assistant: 2 tool calls
-   10:33:02 [---,---] | ~45 est                  |   👤 User: Can you fix the bug?
-   10:33:15 [020,123] | 546 tokens               | 🤖 Assistant: message
+→ 9:17:11 PM [ ---,---] | ~35 est                   | 👤 User: take a look at the changed files...
+  9:17:15 PM [ 016,009] | +37 actual (3 out)        | 🤖 Assistant: message
+  9:17:18 PM [ ---,---] | [0.2KB → ~44 est]         | 📥 ToolResponse: 0.2KB → ~40 tokens
+  9:17:21 PM [ 016,496] | +487 actual (1 out)       | 🤖 Assistant: message
+  9:17:27 PM [ 033,977] | +17,481 actual (3 out)    | 🤖 Assistant: message
+  9:17:40 PM [ 048,394] | +13,858 actual (29 out)   | 🤖 Assistant: TodoWrite: TodoWrite
+  9:17:40 PM [ ---,---] |   [0.2KB → ~44 est]       |   📥 ToolResponse: TodoWrite
+  9:18:02 PM [ 049,669] | +843 actual (41 out)      | 🤖 Assistant: Edit: correlation-engine.test.ts
+  9:18:15 PM [ ---,---] |   [30.7KB → ~8,499 est]   |   📥 ToolResponse: correlation-engine.test.ts
 
 Navigation: [↑↓] select | [Enter] details | [Tab] expand | [t]okens [c]hronological [o]peration | [q]uit
 ```
@@ -68,7 +72,6 @@ Navigation: [↑↓] select | [Enter] details | [Tab] expand | [t]okens [c]hrono
 ### Interactive Analysis (Default)
 ```bash
 token-nerd              # Browse sessions in tree view
-token-nerd browse       # Same as above
 token-nerd --session <session-id>  # Analyze specific session
 ```
 
@@ -81,7 +84,7 @@ token-nerd stats        # Show current Claude session stats (requires claude CLI
 ### Statusline Integration
 ```bash
 # Automatically configured during installation
-# Shows real token counts in Claude Code statusline as: 🐿️ 156,107 (100%)
+# Shows token counts in Claude Code statusline as: 🐿️ 150,107 (97%)
 # No manual setup required - works immediately after npm install + Claude restart
 ```
 
@@ -111,14 +114,27 @@ Common patterns to look for:
 1. **Large File Reads**: Look for Read operations with high token costs
 2. **Tool Response Size**: ToolResponse entries show `[12.5KB → ~3,378 est]` format
 3. **Cache Misses**: Operations marked with ⚠️ indicate cache expiration (>5min gaps)
-4. **Context Spikes**: Look for `+X actual` values that are unexpectedly high
-5. **Linked Operations**: Press Enter on ToolResponse to see full tool execution chain 
+4. **Context Spikes**: Look for `+X actual` values that are unexpectedly high 
 
 ## Requirements
 
+> **_Only tested on Linux, but attempted to cover Windows and Mac. Open an issue if you're getting errors on those systems._**
+
 - **Node.js**: >=18.0.0
 - **Claude Code**: Latest version
-- **Redis**: Automatically managed by MCP server
+- **Redis**: Must be installed on your system
+  ```bash
+  # macOS
+  brew install redis
+  
+  # Ubuntu/Debian
+  sudo apt install redis-server
+  
+  # Windows
+  # Use Redis for Windows or WSL
+  ```
+  
+> **Note**: Token Nerd automatically starts Redis via its MCP server - you just need Redis installed, not running.
 
 ## Architecture
 
@@ -132,7 +148,7 @@ Token Nerd uses a dual-component architecture:
 2. **Analysis Interface**:
    - Interactive TUI for session exploration  
    - Real-time statusline integration
-   - Correlation engine matches operations to token costs
+   - Correlation engine matches operations to token burns
 
 ## Contributing
 
