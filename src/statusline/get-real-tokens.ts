@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as readline from 'readline';
-import { calculateTokenStatus } from './config.js';
+import { calculateTokenStatus } from './config';
 import { getCurrentTokenCount } from '../lib/token-calculator';
 
 interface TokenUsage {

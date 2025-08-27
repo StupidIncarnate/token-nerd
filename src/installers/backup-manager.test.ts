@@ -38,7 +38,7 @@ describe('BackupManager', () => {
       expect(fs.readFileSync(metadata!.backupPath, 'utf-8')).toBe('original content');
       expect(metadata!.component).toBe('test-component');
       expect(metadata!.operation).toBe('install');
-      expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining('✓ Backed up'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(`✓ Backed up ${testFile} to ${metadata!.backupPath}`);
     });
 
     it('should return null for non-existent file', async () => {

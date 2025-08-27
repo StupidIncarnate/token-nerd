@@ -1,6 +1,6 @@
-#!/usr/bin/env -S npx tsx
+#!/usr/bin/env node
 
-import { TokenNerdInstaller } from './src/installers/token-nerd-installer';
+const { TokenNerdInstaller } = require('./dist/installers/token-nerd-installer.js');
 
 async function postInstall() {
   const installer = new TokenNerdInstaller();
@@ -20,4 +20,4 @@ if (require.main === module) {
   postInstall();
 }
 
-export { postInstall };
+module.exports = { postInstall };

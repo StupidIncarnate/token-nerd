@@ -133,4 +133,9 @@ function shutdown() {
   process.exit(0);
 }
 
-main().catch(console.error);
+export { main };
+
+// If run directly (not as import), execute main
+if (require.main === module) {
+  main().catch(console.error);
+}

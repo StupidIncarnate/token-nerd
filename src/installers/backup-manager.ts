@@ -46,7 +46,7 @@ export class BackupManager {
       };
 
       await this.saveBackupMetadata(metadata);
-      console.log(`✓ Backed up ${filePath} to ${path.basename(backupPath)}`);
+      console.log(`✓ Backed up ${filePath} to ${backupPath}`);
       return metadata;
     } catch (error) {
       throw new Error(`Failed to create backup of ${filePath}: ${error}`);

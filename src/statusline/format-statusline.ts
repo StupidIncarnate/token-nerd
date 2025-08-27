@@ -4,7 +4,7 @@
  * Shows real tokens with cache breakdown
  */
 
-import { formatTokenCount } from './config.js';
+import { formatTokenCount } from './config';
 
 const transcriptPath = process.argv[2];
 const tokenCount = parseInt(process.argv[3]) || 0;

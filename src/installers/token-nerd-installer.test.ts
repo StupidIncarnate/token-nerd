@@ -44,6 +44,8 @@ describe('TokenNerdInstaller', () => {
     createMockFiles();
     installer = new TokenNerdInstaller();
     
+    // No path overrides needed for new architecture
+    
     // Set up mocks for stats collection
     const statsCollectorModule = require('../lib/stats-collector');
     mockCollectContextStats = statsCollectorModule.collectContextStats;
@@ -77,9 +79,10 @@ describe('TokenNerdInstaller', () => {
     });
 
     it('should rollback on installation failure', async () => {
-      // Remove MCP server file to cause failure
-      const mcpServerPath = path.join(TEST_TEMP_DIR, 'src', 'mcp-server', 'index.ts');
-      fs.unlinkSync(mcpServerPath);
+      // Mock one installer to fail during install
+      const mcpInstaller = (installer as any).installers[0];
+      const originalInstall = mcpInstaller.doInstall;
+      mcpInstaller.doInstall = jest.fn().mockRejectedValue(new Error('Install failed'));
       
       await expect(installer.install()).rejects.toThrow();
       
@@ -88,6 +91,9 @@ describe('TokenNerdInstaller', () => {
       expect(status['mcp-server']).toBe(false);
       expect(status['hooks']).toBe(false);
       expect(status['statusline']).toBe(false);
+      
+      // Restore original method
+      mcpInstaller.doInstall = originalInstall;
     });
 
     it('should handle partial installation and rollback properly', async () => {

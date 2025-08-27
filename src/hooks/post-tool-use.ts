@@ -93,7 +93,7 @@ async function processRedisOperations(input: string) {
   }
 }
 
-async function main() {
+export async function main() {
   let input = '';
   process.stdin.setEncoding('utf8');
 
@@ -111,4 +111,7 @@ async function main() {
   });
 }
 
-main().catch(() => process.exit(1));
+// If run directly (not as import), execute main
+if (require.main === module) {
+  main().catch(() => process.exit(1));
+}

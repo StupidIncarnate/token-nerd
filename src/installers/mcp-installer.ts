@@ -1,16 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { BaseInstaller } from './base-installer';
 import { getClaudeConfigPath } from './utils';
 
 export class McpInstaller extends BaseInstaller {
   private claudeConfigPath: string;
-  private mcpServerPath: string;
 
   constructor() {
     super();
     this.claudeConfigPath = getClaudeConfigPath();
-    this.mcpServerPath = path.join(process.cwd(), 'src', 'mcp-server', 'index.ts');
   }
 
   getName(): string {
@@ -18,10 +17,6 @@ export class McpInstaller extends BaseInstaller {
   }
 
   async doInstall(): Promise<void> {
-    if (!fs.existsSync(this.mcpServerPath)) {
-      throw new Error(`MCP server not found at ${this.mcpServerPath}`);
-    }
-
     // Backup existing config if it exists
     if (fs.existsSync(this.claudeConfigPath)) {
       await this.createBackup(this.claudeConfigPath, 'install');
@@ -49,8 +44,8 @@ export class McpInstaller extends BaseInstaller {
     }
 
     config.mcpServers['token-nerd'] = {
-      "command": "npx",
-      "args": ["tsx", this.mcpServerPath],
+      "command": "token-nerd",
+      "args": ["process:mcp"],
       "env": {
         "NODE_ENV": "production"
       }
@@ -58,6 +53,12 @@ export class McpInstaller extends BaseInstaller {
 
     // Write updated config
     try {
+      // Ensure directory exists
+      const configDir = path.dirname(this.claudeConfigPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+      
       fs.writeFileSync(this.claudeConfigPath, JSON.stringify(config, null, 2));
       console.log('✓ Added Token Nerd MCP server to ~/.claude.json');
     } catch (error) {
@@ -66,24 +67,23 @@ export class McpInstaller extends BaseInstaller {
   }
 
   async doUninstall(): Promise<void> {
-    if (!fs.existsSync(this.claudeConfigPath)) {
-      return;
-    }
+    // Remove MCP server configuration from Claude config
+    if (fs.existsSync(this.claudeConfigPath)) {
+      // Backup before modifying
+      await this.createBackup(this.claudeConfigPath, 'uninstall');
 
-    // Backup before modifying
-    await this.createBackup(this.claudeConfigPath, 'uninstall');
-
-    try {
-      const content = fs.readFileSync(this.claudeConfigPath, 'utf-8');
-      const config = JSON.parse(content);
-      
-      if (config.mcpServers && config.mcpServers['token-nerd']) {
-        delete config.mcpServers['token-nerd'];
-        fs.writeFileSync(this.claudeConfigPath, JSON.stringify(config, null, 2));
-        console.log('✓ Removed MCP server from Claude config');
+      try {
+        const content = fs.readFileSync(this.claudeConfigPath, 'utf-8');
+        const config = JSON.parse(content);
+        
+        if (config.mcpServers && config.mcpServers['token-nerd']) {
+          delete config.mcpServers['token-nerd'];
+          fs.writeFileSync(this.claudeConfigPath, JSON.stringify(config, null, 2));
+          console.log('✓ Removed MCP server from Claude config');
+        }
+      } catch (error) {
+        throw new Error(`Failed to remove MCP server from config: ${error}`);
       }
-    } catch (error) {
-      throw new Error(`Failed to remove MCP server from config: ${error}`);
     }
   }
 
@@ -107,23 +107,17 @@ export class McpInstaller extends BaseInstaller {
       return false;
     }
 
-    // Check if MCP server file exists
-    if (!fs.existsSync(this.mcpServerPath)) {
-      return false;
-    }
-
     try {
-      // Validate config file is valid JSON
+      // Validate config file is valid JSON and has correct command
       const content = fs.readFileSync(this.claudeConfigPath, 'utf-8');
       const config = JSON.parse(content);
       
       const mcpConfig = config.mcpServers['token-nerd'];
       return !!(
         mcpConfig &&
-        mcpConfig.command === 'npx' &&
+        mcpConfig.command === 'token-nerd' &&
         Array.isArray(mcpConfig.args) &&
-        mcpConfig.args.includes('tsx') &&
-        mcpConfig.args.includes(this.mcpServerPath)
+        mcpConfig.args.includes('process:mcp')
       );
     } catch (error) {
       return false;

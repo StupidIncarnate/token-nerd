@@ -9,10 +9,13 @@ import { launchTUI } from '../lib/tui-components';
 import * as path from 'path';
 import * as os from 'os';
 
+// Import version from package.json
+const packageJson = require('../../package.json');
+
 program
   .name('token-nerd')
   .description('Track and analyze token usage in Claude sessions')
-  .version('0.1.0');
+  .version(packageJson.version);
 
 // Sessions subcommand - flat list
 program
@@ -104,6 +107,31 @@ program
       }
       process.exit(1);
     }
+  });
+
+// Process subcommands for Claude integration
+program
+  .command('process:pre-hook')
+  .description('Pre-tool-use hook for Claude (internal use)')
+  .action(async () => {
+    const { main } = await import('../hooks/pre-tool-use');
+    await main();
+  });
+
+program
+  .command('process:post-hook')
+  .description('Post-tool-use hook for Claude (internal use)')
+  .action(async () => {
+    const { main } = await import('../hooks/post-tool-use');
+    await main();
+  });
+
+program
+  .command('process:mcp')
+  .description('MCP server for Claude (internal use)')
+  .action(async () => {
+    const { main } = await import('../mcp-server/mcp-server');
+    await main();
   });
 
 

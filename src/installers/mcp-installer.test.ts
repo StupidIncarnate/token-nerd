@@ -11,6 +11,7 @@ const originalConsoleWarn = console.warn;
 
 // Mock process.cwd to return test directory
 const originalCwd = process.cwd;
+
 beforeAll(() => {
   process.cwd = jest.fn().mockReturnValue(TEST_TEMP_DIR);
   console.log = mockConsoleLog;
@@ -26,14 +27,12 @@ afterAll(() => {
 describe('McpInstaller', () => {
   let installer: McpInstaller;
   let claudeConfigPath: string;
-  let mcpServerPath: string;
 
   beforeEach(() => {
     jest.clearAllMocks();
     createMockFiles();
     installer = new McpInstaller();
     claudeConfigPath = path.join(TEST_TEMP_DIR, '.claude.json');
-    mcpServerPath = path.join(TEST_TEMP_DIR, 'src', 'mcp-server', 'index.ts');
   });
 
   describe('doInstall', () => {
@@ -44,8 +43,9 @@ describe('McpInstaller', () => {
       
       const config = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
       expect(config.mcpServers['token-nerd']).toBeDefined();
-      expect(config.mcpServers['token-nerd'].command).toBe('npx');
-      expect(config.mcpServers['token-nerd'].args).toEqual(['tsx', mcpServerPath]);
+      expect(config.mcpServers['token-nerd'].command).toBe('token-nerd');
+      expect(config.mcpServers['token-nerd'].args).toEqual(['process:mcp']);
+      expect(config.mcpServers['token-nerd'].env).toEqual({ NODE_ENV: 'production' });
     });
 
     it('should add to existing claude config', async () => {
@@ -83,10 +83,17 @@ describe('McpInstaller', () => {
       expect(config.mcpServers['token-nerd'].command).toBe('existing-command');
     });
 
-    it('should throw error if MCP server file does not exist', async () => {
-      fs.unlinkSync(mcpServerPath);
+    it('should handle installation when config directory does not exist', async () => {
+      const configDir = path.dirname(claudeConfigPath);
+      if (fs.existsSync(configDir)) {
+        fs.rmSync(configDir, { recursive: true });
+      }
       
-      await expect(installer.doInstall()).rejects.toThrow('MCP server not found');
+      await installer.doInstall();
+      
+      expect(fs.existsSync(claudeConfigPath)).toBe(true);
+      const config = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
+      expect(config.mcpServers['token-nerd']).toBeDefined();
     });
 
     it('should throw error if config file is invalid JSON', async () => {
@@ -161,12 +168,11 @@ describe('McpInstaller', () => {
       expect(result).toBe(false);
     });
 
-    it('should return false if MCP server file is missing', async () => {
+    it('should return true if config is valid', async () => {
       await installer.doInstall();
-      fs.unlinkSync(mcpServerPath);
       
       const result = await installer.validateInstallation();
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     it('should return true if everything is valid', async () => {
@@ -229,7 +235,7 @@ describe('McpInstaller', () => {
       const invalidConfig = {
         mcpServers: {
           'token-nerd': {
-            command: 'npx',
+            command: 'token-nerd',
             args: 'not-an-array'
           }
         }
@@ -241,12 +247,12 @@ describe('McpInstaller', () => {
       expect(result).toBe(false);
     });
 
-    it('should return false when args missing tsx', async () => {
+    it('should return false when args missing process:mcp', async () => {
       const invalidConfig = {
         mcpServers: {
           'token-nerd': {
-            command: 'npx',
-            args: ['wrong-tool', mcpServerPath]
+            command: 'token-nerd',
+            args: ['wrong-args']
           }
         }
       };

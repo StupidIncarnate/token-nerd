@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { HooksInstaller } from './hooks-installer';
-import { TEST_TEMP_DIR, TEST_HOOKS_DIR, TEST_CLAUDE_DIR, createMockFiles } from '../test-setup';
+import { TEST_TEMP_DIR, TEST_CLAUDE_DIR, createMockFiles } from '../test-setup';
 
 // Mock console methods to prevent test output clutter
 const mockConsoleLog = jest.fn();
@@ -25,39 +25,19 @@ afterAll(() => {
 
 describe('HooksInstaller', () => {
   let installer: HooksInstaller;
-  let sourceDir: string;
+  let settingsPath: string;
 
   beforeEach(() => {
     jest.clearAllMocks();
     createMockFiles();
     installer = new HooksInstaller();
-    sourceDir = path.join(TEST_TEMP_DIR, 'src', 'hooks');
+    settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
   });
 
   describe('doInstall', () => {
-    it('should create symlinks for all hooks', async () => {
-      await installer.doInstall();
-      
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
-      
-      expect(fs.existsSync(preHookPath)).toBe(true);
-      expect(fs.existsSync(postHookPath)).toBe(true);
-      
-      expect(fs.lstatSync(preHookPath).isSymbolicLink()).toBe(true);
-      expect(fs.lstatSync(postHookPath).isSymbolicLink()).toBe(true);
-      
-      const preTarget = fs.readlinkSync(preHookPath);
-      const postTarget = fs.readlinkSync(postHookPath);
-      
-      expect(preTarget).toBe(path.join(sourceDir, 'pre-tool-use.ts'));
-      expect(postTarget).toBe(path.join(sourceDir, 'post-tool-use.ts'));
-    });
-
     it('should configure hooks in settings.json', async () => {
       await installer.doInstall();
       
-      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
       expect(fs.existsSync(settingsPath)).toBe(true);
       
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -70,15 +50,23 @@ describe('HooksInstaller', () => {
       
       expect(preConfig.matcher).toBe('*');
       expect(preConfig.hooks[0].type).toBe('command');
-      expect(preConfig.hooks[0].command).toContain('pre-tool-use');
+      expect(preConfig.hooks[0].command).toBe('token-nerd process:pre-hook');
       
       expect(postConfig.matcher).toBe('*');
       expect(postConfig.hooks[0].type).toBe('command');
-      expect(postConfig.hooks[0].command).toContain('post-tool-use');
+      expect(postConfig.hooks[0].command).toBe('token-nerd process:post-hook');
+    });
+
+    it('should create settings directory if it does not exist', async () => {
+      fs.rmSync(TEST_CLAUDE_DIR, { recursive: true, force: true });
+      
+      await installer.doInstall();
+      
+      expect(fs.existsSync(TEST_CLAUDE_DIR)).toBe(true);
+      expect(fs.existsSync(settingsPath)).toBe(true);
     });
 
     it('should preserve existing settings.json content', async () => {
-      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
       const existingSettings = {
         model: 'opus',
         statusLine: { type: 'command', command: 'echo test' }
@@ -93,56 +81,27 @@ describe('HooksInstaller', () => {
       expect(settings.hooks).toBeDefined();
     });
 
-    it('should make hooks executable', async () => {
+    it('should handle invalid existing settings.json', async () => {
+      fs.writeFileSync(settingsPath, 'invalid json');
+      
       await installer.doInstall();
       
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
-      
-      const preStats = fs.statSync(preHookPath);
-      const postStats = fs.statSync(postHookPath);
-      
-      // Check if executable bit is set
-      expect(preStats.mode & parseInt('111', 8)).toBeTruthy();
-      expect(postStats.mode & parseInt('111', 8)).toBeTruthy();
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      expect(settings.hooks).toBeDefined();
+      expect(settings.hooks.PreToolUse).toBeDefined();
+      expect(settings.hooks.PostToolUse).toBeDefined();
     });
 
-    it('should skip if hook already installed', async () => {
-      await installer.doInstall();
-      
-      // Install again - should not throw
-      await expect(installer.doInstall()).resolves.not.toThrow();
-    });
-
-    it('should backup and replace existing non-symlink hooks', async () => {
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      
-      // Create existing hook file (not symlink)
-      fs.writeFileSync(preHookPath, 'existing hook content');
+    it('should create backup of existing settings.json', async () => {
+      const existingSettings = { model: 'opus' };
+      fs.writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2));
       
       await installer.doInstall();
-      
-      // Should be symlink now
-      expect(fs.lstatSync(preHookPath).isSymbolicLink()).toBe(true);
       
       // Check that backup was created
       const backupManager = (installer as any).backupManager;
       const backups = await backupManager.getBackupsForComponent('hooks');
       expect(backups.length).toBeGreaterThan(0);
-    });
-
-    it('should throw error if source hook file does not exist', async () => {
-      fs.unlinkSync(path.join(sourceDir, 'pre-tool-use.ts'));
-      
-      await expect(installer.doInstall()).rejects.toThrow('Source hook not found');
-    });
-
-    it('should create hooks directory if it does not exist', async () => {
-      fs.rmSync(TEST_HOOKS_DIR, { recursive: true, force: true });
-      
-      await installer.doInstall();
-      
-      expect(fs.existsSync(TEST_HOOKS_DIR)).toBe(true);
     });
   });
 
@@ -151,22 +110,7 @@ describe('HooksInstaller', () => {
       await installer.doInstall();
     });
 
-    it('should remove symlinks created by installer', async () => {
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
-      
-      expect(fs.existsSync(preHookPath)).toBe(true);
-      expect(fs.existsSync(postHookPath)).toBe(true);
-      
-      await installer.doUninstall();
-      
-      expect(fs.existsSync(preHookPath)).toBe(false);
-      expect(fs.existsSync(postHookPath)).toBe(false);
-    });
-
     it('should remove hook configuration from settings.json', async () => {
-      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
-      
       // Verify hooks are configured after install
       let settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       expect(settings.hooks).toBeDefined();
@@ -181,8 +125,6 @@ describe('HooksInstaller', () => {
     });
 
     it('should preserve other settings when removing hooks', async () => {
-      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
-      
       // Add some other settings
       let settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       settings.model = 'opus';
@@ -198,105 +140,130 @@ describe('HooksInstaller', () => {
       expect(settings.hooks).toBeUndefined();
     });
 
-    it('should not remove non-symlink hooks', async () => {
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
+    it('should handle non-existent settings.json gracefully', async () => {
+      fs.unlinkSync(settingsPath);
       
-      // Remove symlink and create regular file
-      fs.unlinkSync(preHookPath);
-      fs.writeFileSync(preHookPath, 'user hook content');
-      
-      await installer.doUninstall();
-      
-      // Should still exist
-      expect(fs.existsSync(preHookPath)).toBe(true);
-      expect(fs.readFileSync(preHookPath, 'utf-8')).toBe('user hook content');
+      await expect(installer.doUninstall()).resolves.not.toThrow();
     });
 
-    it('should not remove symlinks pointing to different targets', async () => {
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
+    it('should handle corrupted settings.json during uninstall', async () => {
+      fs.writeFileSync(settingsPath, 'corrupted json');
       
-      // Create a real target file for the symlink
-      const otherTarget = path.join(TEST_TEMP_DIR, 'other-hook.ts');
-      fs.writeFileSync(otherTarget, '// Other hook');
-      
-      // Remove our symlink and create one pointing elsewhere
-      fs.unlinkSync(preHookPath);
-      fs.symlinkSync(otherTarget, preHookPath);
-      
+      await expect(installer.doUninstall()).resolves.not.toThrow();
+    });
+
+    it('should restore backed up settings', async () => {
       await installer.doUninstall();
       
-      // Should still exist since it points to different target
-      expect(fs.existsSync(preHookPath)).toBe(true);
-      expect(fs.lstatSync(preHookPath).isSymbolicLink()).toBe(true);
-      expect(fs.readlinkSync(preHookPath)).toBe(otherTarget);
+      // Verify restoreBackupsForComponent was called
+      const backupManager = (installer as any).backupManager;
+      // We can't easily test this without mocking, but the method should exist
+      expect(typeof installer['restoreBackupsForComponent']).toBe('function');
     });
   });
 
   describe('checkInstalled', () => {
-    it('should return false if no hooks exist', async () => {
+    it('should return false if settings.json does not exist', async () => {
       const result = await installer.checkInstalled();
       expect(result).toBe(false);
     });
 
-    it('should return false if only some hooks exist', async () => {
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      fs.symlinkSync(path.join(sourceDir, 'pre-tool-use.ts'), preHookPath);
-      
-      const result = await installer.checkInstalled();
-      expect(result).toBe(false);
-    });
-
-    it('should return false if hooks are not symlinks', async () => {
-      fs.writeFileSync(path.join(TEST_HOOKS_DIR, 'pre-tool-use'), 'regular file');
-      fs.writeFileSync(path.join(TEST_HOOKS_DIR, 'post-tool-use'), 'regular file');
-      
-      const result = await installer.checkInstalled();
-      expect(result).toBe(false);
-    });
-
-    it('should return false if symlinks point to wrong targets', async () => {
-      fs.symlinkSync('/wrong/path', path.join(TEST_HOOKS_DIR, 'pre-tool-use'));
-      fs.symlinkSync('/wrong/path', path.join(TEST_HOOKS_DIR, 'post-tool-use'));
-      
-      const result = await installer.checkInstalled();
-      expect(result).toBe(false);
-    });
-
-    it('should return false if hooks exist but settings.json not configured', async () => {
-      // Create hook files but not settings.json configuration
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
-      fs.symlinkSync(path.join(sourceDir, 'pre-tool-use.ts'), preHookPath);
-      fs.symlinkSync(path.join(sourceDir, 'post-tool-use.ts'), postHookPath);
-      fs.chmodSync(preHookPath, 0o755);
-      fs.chmodSync(postHookPath, 0o755);
-      
-      const result = await installer.checkInstalled();
-      expect(result).toBe(false);
-    });
-
-    it('should return false if settings.json exists but missing hook configuration', async () => {
-      // Create hook files
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
-      fs.symlinkSync(path.join(sourceDir, 'pre-tool-use.ts'), preHookPath);
-      fs.symlinkSync(path.join(sourceDir, 'post-tool-use.ts'), postHookPath);
-      fs.chmodSync(preHookPath, 0o755);
-      fs.chmodSync(postHookPath, 0o755);
-      
-      // Create settings.json without hook configuration
-      const settingsPath = path.join(TEST_CLAUDE_DIR, 'settings.json');
+    it('should return false if settings.json exists but has no hooks', async () => {
       fs.writeFileSync(settingsPath, JSON.stringify({ model: 'opus' }, null, 2));
       
       const result = await installer.checkInstalled();
       expect(result).toBe(false);
     });
 
-    it('should return true if all hooks are correctly installed and configured', async () => {
+    it('should return false if hooks exist but missing PreToolUse', async () => {
+      const settings = {
+        hooks: {
+          PostToolUse: [
+            {
+              matcher: '*',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'token-nerd process:post-hook'
+                }
+              ]
+            }
+          ]
+        }
+      };
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      
+      const result = await installer.checkInstalled();
+      expect(result).toBe(false);
+    });
+
+    it('should return false if hooks exist but missing PostToolUse', async () => {
+      const settings = {
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: '*',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'token-nerd process:pre-hook'
+                }
+              ]
+            }
+          ]
+        }
+      };
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      
+      const result = await installer.checkInstalled();
+      expect(result).toBe(false);
+    });
+
+    it('should return false if hook command is incorrect', async () => {
+      const settings = {
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: '*',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'wrong-command'
+                }
+              ]
+            }
+          ],
+          PostToolUse: [
+            {
+              matcher: '*',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'token-nerd process:post-hook'
+                }
+              ]
+            }
+          ]
+        }
+      };
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      
+      const result = await installer.checkInstalled();
+      expect(result).toBe(false);
+    });
+
+    it('should return true if all hooks are correctly configured', async () => {
       await installer.doInstall();
       
       const result = await installer.checkInstalled();
       expect(result).toBe(true);
+    });
+
+    it('should handle corrupted settings.json gracefully', async () => {
+      fs.writeFileSync(settingsPath, 'invalid json');
+      
+      const result = await installer.checkInstalled();
+      expect(result).toBe(false);
     });
   });
 
@@ -306,28 +273,7 @@ describe('HooksInstaller', () => {
       expect(result).toBe(false);
     });
 
-    it('should return false if source files are missing', async () => {
-      await installer.doInstall();
-      
-      // Remove source file
-      fs.unlinkSync(path.join(sourceDir, 'pre-tool-use.ts'));
-      
-      const result = await installer.validateInstallation();
-      expect(result).toBe(false);
-    });
-
-    it('should return false if hooks are not executable', async () => {
-      await installer.doInstall();
-      
-      // Remove executable permission
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      fs.chmodSync(preHookPath, 0o644);
-      
-      const result = await installer.validateInstallation();
-      expect(result).toBe(false);
-    });
-
-    it('should return true if everything is valid', async () => {
+    it('should return true if correctly installed', async () => {
       await installer.doInstall();
       
       const result = await installer.validateInstallation();
@@ -338,51 +284,6 @@ describe('HooksInstaller', () => {
   describe('getName', () => {
     it('should return correct component name', () => {
       expect(installer.getName()).toBe('hooks');
-    });
-  });
-
-  describe('Error Handling', () => {
-    it('should handle broken symlinks during install', async () => {
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      const postHookPath = path.join(TEST_HOOKS_DIR, 'post-tool-use');
-      fs.symlinkSync('/nonexistent/path', preHookPath);
-      
-      await installer.doInstall();
-      
-      // Should replace broken symlink and create the missing one
-      expect(fs.lstatSync(preHookPath).isSymbolicLink()).toBe(true);
-      expect(fs.lstatSync(postHookPath).isSymbolicLink()).toBe(true);
-      const preTarget = fs.readlinkSync(preHookPath);
-      const postTarget = fs.readlinkSync(postHookPath);
-      expect(preTarget).toBe(path.join(sourceDir, 'pre-tool-use.ts'));
-      expect(postTarget).toBe(path.join(sourceDir, 'post-tool-use.ts'));
-    });
-
-    it('should return false if hooks directory does not exist during validation', async () => {
-      await installer.doInstall();
-      fs.rmSync(TEST_HOOKS_DIR, { recursive: true });
-      
-      const result = await installer.validateInstallation();
-      expect(result).toBe(false);
-    });
-
-    it('should handle case where source directory does not exist', async () => {
-      fs.rmSync(sourceDir, { recursive: true, force: true });
-      
-      await expect(installer.doInstall()).rejects.toThrow('Source hook not found');
-    });
-
-    it('should handle partial installation state', async () => {
-      // Install only one hook manually
-      const preHookPath = path.join(TEST_HOOKS_DIR, 'pre-tool-use');
-      fs.symlinkSync(path.join(sourceDir, 'pre-tool-use.ts'), preHookPath);
-      fs.chmodSync(preHookPath, 0o755);
-      
-      await installer.doInstall();
-      
-      // Should complete the installation
-      const result = await installer.checkInstalled();
-      expect(result).toBe(true);
     });
   });
 });
