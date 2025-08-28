@@ -11,6 +11,42 @@ import * as os from 'os';
 
 // Import version from package.json
 const packageJson = require('../../package.json');
+const { spawn } = require('child_process');
+
+async function runSessionBrowser(): Promise<void> {
+  while (true) {
+    console.log('📂 Claude Code Session Browser');
+    console.log('Navigate with ↑↓ arrows, expand/collapse projects with Enter, select sessions\n');
+    
+    const selectedSessionId = await selectSessionWithTreeView();
+    if (!selectedSessionId) {
+      // User cancelled session selection
+      break;
+    }
+
+    console.log(`\n🔍 Analyzing session ${selectedSessionId}...`);
+    
+    // Find the actual JSONL file path
+    const { execSync } = require('child_process');
+    let actualJsonlPath: string | undefined;
+    try {
+      const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${selectedSessionId}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
+      actualJsonlPath = result.trim() || undefined;
+    } catch (error) {
+      actualJsonlPath = undefined;
+    }
+    
+    const exitCode = await launchTUI(selectedSessionId, actualJsonlPath);
+    if (exitCode === 2) {
+      // Exit code 2 means "go back to session tree" - continue the loop
+      console.clear();
+      continue;
+    } else {
+      // Exit code 0 or any other code means we're done
+      break;
+    }
+  }
+}
 
 program
   .name('token-nerd')
@@ -45,26 +81,18 @@ program
   .command('browse')
   .description('Browse sessions in tree view by project')
   .action(async () => {
-    console.log('📂 Claude Code Session Browser');
-    console.log('Navigate with ↑↓ arrows, expand/collapse projects with Enter, select sessions\n');
-    
-    const selectedSessionId = await selectSessionWithTreeView();
-    if (selectedSessionId) {
-      console.log(`\n🔍 Analyzing session ${selectedSessionId}...`);
-      const jsonlPath = path.join(os.homedir(), '.claude', 'projects', '*', `${selectedSessionId}.jsonl`);
-      
-      // Find the actual JSONL file path
-      const { execSync } = require('child_process');
-      let actualJsonlPath: string | undefined;
-      try {
-        const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${selectedSessionId}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
-        actualJsonlPath = result.trim() || undefined;
-      } catch (error) {
-        actualJsonlPath = undefined;
-      }
-      
-      await launchTUI(selectedSessionId, actualJsonlPath);
-    }
+    await runSessionBrowser();
+  });
+
+// Cleanup command
+program
+  .command('cleanup')
+  .description('Remove all token-nerd configurations and restore backups')
+  .action(async () => {
+    const { cleanupAll } = await import('../installers/cleanup');
+    await cleanupAll();
+    console.log('✅ All token-nerd configurations have been removed');
+    console.log('You can now safely uninstall with: npm uninstall -g token-nerd');
   });
 
 // Statusline command
@@ -72,7 +100,17 @@ program
   .option('--statusline', 'Output formatted token count for statusline (reads JSON from stdin)')
   .option('--session <id>', 'Select specific session')
   .option('--current', 'Use current project session')
+  .option('--cleanup', 'Remove all configurations and exit')
   .action(async (options) => {
+    // Handle cleanup mode
+    if (options.cleanup) {
+      const { cleanupAll } = await import('../installers/cleanup');
+      await cleanupAll();
+      console.log('✅ All token-nerd configurations have been removed');
+      console.log('You can now safely uninstall with: npm uninstall -g token-nerd');
+      process.exit(0);
+    }
+
     // Handle statusline mode
     if (options.statusline) {
       try {
@@ -117,7 +155,8 @@ program
         actualJsonlPath = undefined;
       }
       
-      await launchTUI(options.session, actualJsonlPath);
+      const exitCode = await launchTUI(options.session, actualJsonlPath);
+      process.exit(exitCode);
     } else {
       // No session specified - will be handled by default behavior below
       return;
@@ -129,25 +168,6 @@ program.parse(process.argv);
 // If no command or options specified, show interactive tree view selection
 if (!process.argv.slice(2).length) {
   (async () => {
-    console.log('📂 Claude Code Session Browser');
-    console.log('Navigate with ↑↓ arrows, expand/collapse projects with Enter, select sessions\n');
-    
-    const selectedSessionId = await selectSessionWithTreeView();
-    if (selectedSessionId) {
-      console.log(`\n🔍 Analyzing session ${selectedSessionId}...`);
-      const jsonlPath = path.join(os.homedir(), '.claude', 'projects', '*', `${selectedSessionId}.jsonl`);
-      
-      // Find the actual JSONL file path
-      const { execSync } = require('child_process');
-      let actualJsonlPath: string | undefined;
-      try {
-        const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${selectedSessionId}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
-        actualJsonlPath = result.trim() || undefined;
-      } catch (error) {
-        actualJsonlPath = undefined;
-      }
-      
-      await launchTUI(selectedSessionId, actualJsonlPath);
-    }
+    await runSessionBrowser();
   })();
 }

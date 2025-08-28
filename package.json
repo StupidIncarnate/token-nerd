@@ -1,6 +1,6 @@
 {
   "name": "token-nerd",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Comprehensive token monitoring and analysis tools for Claude Code sessions",
   "main": "index.js",
   "bin": {

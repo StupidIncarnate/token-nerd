@@ -13,6 +13,8 @@ interface TerminalState {
   expanded: Set<string>;
   viewingDetails: Bundle | null;
   detailScrollOffset: number;
+  shouldExit: boolean;
+  exitCode: number;
 }
 
 class TokenAnalyzer {
@@ -29,7 +31,9 @@ class TokenAnalyzer {
       selectedIndex: 0,
       expanded: new Set(),
       viewingDetails: null,
-      detailScrollOffset: 0
+      detailScrollOffset: 0,
+      shouldExit: false,
+      exitCode: 0
     };
 
     this.rl = readline.createInterface({
@@ -62,6 +66,7 @@ class TokenAnalyzer {
 
       await this.render();
       this.setupKeyHandlers();
+      await this.mainLoop();
       
     } catch (error) {
       console.error('Failed to load operations:', error);
@@ -376,7 +381,7 @@ class TokenAnalyzer {
 
     // Controls
     console.log('\n' + '─'.repeat(80));
-    console.log('Controls: [t]okens | [c]hronological | [o]peration | [Tab] expand | [↑↓] navigate | [Enter] details | [q]uit');
+    console.log('Controls: [t]okens | [c]hronological | [o]peration | [Tab] expand | [↑↓] navigate | [Enter] details | [ESC] back | [q]uit');
     console.log('Press sort keys again to toggle asc/desc (↑↓)');
   }
 
@@ -535,18 +540,35 @@ class TokenAnalyzer {
     console.log('[↑↓] scroll | [ESC] back to list');
   }
 
+  private async mainLoop(): Promise<void> {
+    while (!this.state.shouldExit) {
+      await new Promise<void>((resolve) => {
+        const handleKey = async (key: Buffer) => {
+          const keyStr = key.toString();
+          
+          if (this.state.viewingDetails) {
+            this.handleDetailsKeys(keyStr);
+          } else {
+            this.handleMainKeys(keyStr);
+          }
+          
+          if (!this.state.shouldExit) {
+            await this.render();
+          }
+          
+          process.stdin.off('data', handleKey);
+          resolve();
+        };
+        
+        process.stdin.on('data', handleKey);
+      });
+    }
+    
+    this.cleanup();
+  }
+
   private setupKeyHandlers(): void {
-    process.stdin.on('data', async (key: Buffer) => {
-      const keyStr = key.toString();
-      
-      if (this.state.viewingDetails) {
-        this.handleDetailsKeys(keyStr);
-      } else {
-        this.handleMainKeys(keyStr);
-      }
-      
-      await this.render();
-    });
+    // This method is now empty since mainLoop handles key processing
   }
 
   private handleMainKeys(key: string): void {
@@ -580,9 +602,14 @@ class TokenAnalyzer {
         }
         this.state.selectedIndex = 0;
         break;
+      case '\u001b': // ESC
+        this.state.shouldExit = true;
+        this.state.exitCode = 2; // Special exit code for "back to session tree"
+        break;
       case 'q':
       case '\u0003': // Ctrl+C
-        this.cleanup();
+        this.state.shouldExit = true;
+        this.state.exitCode = 0;
         break;
       case '\t': // Tab
         if (flatItems.length > 0) {
@@ -646,7 +673,8 @@ class TokenAnalyzer {
         break;
       case 'q':
       case '\u0003': // Ctrl+C
-        this.cleanup();
+        this.state.shouldExit = true;
+        this.state.exitCode = 0;
         break;
     }
   }
@@ -664,11 +692,15 @@ class TokenAnalyzer {
     }
     this.rl.close();
     console.clear();
-    process.exit(0);
+  }
+
+  getExitCode(): number {
+    return this.state.exitCode;
   }
 }
 
-export async function launchTUI(sessionId: string, jsonlPath?: string): Promise<void> {
+export async function launchTUI(sessionId: string, jsonlPath?: string): Promise<number> {
   const analyzer = new TokenAnalyzer(sessionId, jsonlPath);
   await analyzer.initialize();
+  return analyzer.getExitCode();
 }

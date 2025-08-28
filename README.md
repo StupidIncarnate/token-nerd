@@ -84,6 +84,16 @@ token-nerd stats        # Show current Claude session stats (requires claude CLI
 # No manual setup required - works immediately after npm install + Claude restart
 ```
 
+### Cleanup/Uninstall
+```bash
+token-nerd cleanup      # Remove all configurations and restore backups
+# OR
+token-nerd --cleanup    # Same as above
+
+# Then uninstall normally:
+npm uninstall -g token-nerd
+```
+
 ## Features
 
 ### 🔍 **Real-Time Monitoring**
@@ -101,12 +111,33 @@ token-nerd stats        # Show current Claude session stats (requires claude CLI
 - Time gap warnings (cache expiration)
 - Drill-down into operation details
 
+## FAQ
+
+### Why is there a sudden token jump from 0 to 16,000+ tokens when Assistant responds?
+
+This is **normal**! The jump shows the initial context size that Claude starts with in your session:
+
+```
+9:35:51 PM [ 000,000] | ~50 est                     | 👤 User: Caveat: The messages below...
+9:36:15 PM [ 016,681] | +16,681 actual (2 out)      | 🤖 Assistant: message
+```
+
+The 16,681 tokens represent:
+- Your initial message(s)  
+- Project files loaded into context (via `/context` command)
+- System prompts and configuration
+- Claude Code's built-in context
+
+**To see what's loaded**: Run `/context` during your Claude session to see exactly what files and content are taking up space.
+
+The token counter shows `000,000` initially because it only tracks *processed* messages. When Claude responds, it processes everything at once, showing the true starting context size.
+
 ## Troubleshooting Context Issues
 
 Common patterns to look for:
 
 1. **Large File Reads**: Look for Read operations with high token costs
-2. **Tool Response Size**: ToolResponse entries show `[12.5KB → ~3,378 est]` format
+2. **Tool Response Size**: ToolResponse entries show `[12.5KB → ~3,378 est]` format  
 3. **Cache Misses**: Operations marked with ⚠️ indicate cache expiration (>5min gaps)
 4. **Context Spikes**: Look for `+X actual` values that are unexpectedly high 
 
