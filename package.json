@@ -2,14 +2,15 @@
   "name": "token-nerd",
   "version": "0.1.4",
   "description": "Comprehensive token monitoring and analysis tools for Claude Code sessions",
-  "main": "dist/index.js",
+  "main": "index.js",
   "bin": {
-    "token-nerd": "./dist/cli/index.js"
+    "token-nerd": "./router.js"
   },
   "files": [
     "dist/",
-    "postinstall.js",
-    "preuninstall.js",
+    "src/",
+    "index.js",
+    "router.js",
     "README.md"
   ],
   "scripts": {
@@ -17,8 +18,8 @@
     "typecheck": "npx tsc --noEmit", 
     "test": "jest",
     "prepublishOnly": "npm run test && npm run build",
-    "postinstall": "node postinstall.js",
-    "preuninstall": "node preuninstall.js"
+    "postinstall": "tsx src/postinstall.ts",
+    "preuninstall": "tsx src/preuninstall.ts"
   },
   "dependencies": {
     "commander": "^9.0.0",

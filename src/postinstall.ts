@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { TokenNerdInstaller } = require('./dist/installers/token-nerd-installer.js');
+import { TokenNerdInstaller } from './installers/token-nerd-installer';
 
 async function postInstall() {
   const installer = new TokenNerdInstaller();
@@ -20,4 +20,4 @@ if (require.main === module) {
   postInstall();
 }
 
-module.exports = { postInstall };
+export { postInstall };

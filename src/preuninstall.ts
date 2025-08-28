@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { TokenNerdInstaller } = require('./dist/installers/token-nerd-installer.js');
+import { TokenNerdInstaller } from './installers/token-nerd-installer';
 
 async function preUninstall() {
   const installer = new TokenNerdInstaller();
@@ -19,4 +19,4 @@ if (require.main === module) {
   preUninstall();
 }
 
-module.exports = { preUninstall };
+export { preUninstall };
