@@ -1,37 +1,15 @@
-import { correlateOperations, resetRedisClient } from './correlation-engine';
-import { createClient } from 'redis';
+import { correlateOperations } from './correlation-engine';
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as statsCollector from './stats-collector';
 
-// Mock Redis, fs, and stats-collector
-jest.mock('redis');
+// Mock fs
 jest.mock('fs');
-jest.mock('./stats-collector');
 
-const mockedRedis = jest.mocked(createClient);
 const mockedFs = jest.mocked(fs);
-const mockedStatsCollector = jest.mocked(statsCollector);
 
 describe('correlation-engine: Real-world JSONL-only scenarios', () => {
-  let mockRedisClient: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    resetRedisClient();
-    
-    mockRedisClient = {
-      connect: jest.fn(),
-      disconnect: jest.fn(),
-      isOpen: true,
-      keys: jest.fn().mockResolvedValue([]), // Always empty Redis (no hook data)
-      get: jest.fn()
-    };
-    mockedRedis.mockReturnValue(mockRedisClient);
-    
-    // Mock stats collector to avoid Redis calls
-    mockedStatsCollector.getSnapshotForSession.mockResolvedValue(null);
   });
 
   describe('ACTUAL Claude JSONL format (no hooks)', () => {
@@ -243,29 +221,7 @@ describe('correlation-engine: Real-world JSONL-only scenarios', () => {
   });
 
   describe('Edge cases that might cause 0 operations bug', () => {
-    it('should handle session with Redis empty AND invalid JSONL path', async () => {
-      // This tests the exact scenario we're seeing
-      mockRedisClient.keys.mockResolvedValue([]); // No Redis data
-      mockedFs.existsSync.mockReturnValue(false); // Invalid JSONL path
-
-      const result = await correlateOperations('bug-scenario', '/invalid/path.jsonl');
-
-      expect(result).toEqual([]);
-    });
-
-    it('should handle session with Redis empty AND empty JSONL content', async () => {
-      // This might be causing the "1 bundle with 0 operations" bug
-      mockRedisClient.keys.mockResolvedValue([]);
-      mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readFileSync.mockReturnValue('   \n\n   '); // Whitespace only
-
-      const result = await correlateOperations('whitespace-session', '/test/whitespace.jsonl');
-
-      expect(result).toEqual([]);
-    });
-
     it('should handle JSONL with messages but no valid usage data', async () => {
-      mockRedisClient.keys.mockResolvedValue([]);
       mockedFs.existsSync.mockReturnValue(true);
       mockedFs.readFileSync.mockReturnValue([
         '{"type":"user","message":{"role":"user","content":"user message"},"timestamp":"2025-08-23T04:25:37.253Z"}',

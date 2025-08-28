@@ -17,8 +17,6 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 
 ### Data Sources
 - **JSONL transcripts** in `~/.claude/projects/` contain token usage
-- **Pre/post hooks** capture operation details as they happen
-- **Redis** stores operation data (MCP server ensures it's always running)
 
 ## Implementation Steps
 

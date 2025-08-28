@@ -33,14 +33,15 @@ jest.mock('path', () => ({
   basename: jest.fn((filepath: string, ext?: string) => {
     const name = filepath.split('/').pop() || '';
     return ext ? name.replace(ext, '') : name;
+  }),
+  dirname: jest.fn((filepath: string) => {
+    const parts = filepath.split('/');
+    parts.pop();
+    return parts.join('/') || '/';
   })
 }));
 
-// Mock os module
-const mockHomedir = jest.fn();
-jest.mock('os', () => ({
-  homedir: mockHomedir
-}));
+// Note: os.homedir is mocked globally in test-setup.ts
 
 // Mock inquirer
 jest.mock('inquirer', () => ({
@@ -59,7 +60,7 @@ const mockGetCurrentTokenCount = getCurrentTokenCount as jest.MockedFunction<typ
 describe('SessionTreeView', () => {
   let treeView: SessionTreeView;
   let originalCwd: () => string;
-  const mockHomeDir = '/mock/home';
+  const mockHomeDir = '/tmp/token-nerd-tests'; // Must match TEST_TEMP_DIR from test-setup
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -68,11 +69,15 @@ describe('SessionTreeView', () => {
     mockGetCurrentTokenCount.mockResolvedValue(100);
     
     // Setup mock implementations
-    mockHomedir.mockReturnValue(mockHomeDir);
     mockPath.join.mockImplementation((...parts) => parts.join('/'));
     mockPath.basename.mockImplementation((filepath: string, ext?: string) => {
       const name = filepath.split('/').pop() || '';
       return ext ? name.replace(ext, '') : name;
+    });
+    mockPath.dirname.mockImplementation((filepath: string) => {
+      const parts = filepath.split('/');
+      parts.pop();
+      return parts.join('/') || '/';
     });
 
     // Mock process.cwd
@@ -102,10 +107,10 @@ describe('SessionTreeView', () => {
     it('should load projects and sessions when directory exists', async () => {
       mockFs.existsSync.mockReturnValue(true);
       
-      // Mock project directories
+      // Mock project directories - using tmp-token-nerd-tests pattern to match TEST_TEMP_DIR
       const mockDirents = [
-        { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true },
-        { name: '-home-brutus-home-projects-other-app', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-token-nerd', isDirectory: () => true },
+        { name: '-tmp-token-nerd-tests-projects-other-app', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       
@@ -133,7 +138,7 @@ describe('SessionTreeView', () => {
       mockFs.existsSync.mockReturnValue(true);
       
       const mockDirents = [
-        { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-token-nerd', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['session1.jsonl'] as any);
@@ -152,8 +157,8 @@ describe('SessionTreeView', () => {
     beforeEach(() => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true },
-        { name: '-home-brutus-home-projects-other-app', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-token-nerd', isDirectory: () => true },
+        { name: '-mock-home-projects-other-app', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync
@@ -212,7 +217,7 @@ describe('SessionTreeView', () => {
       // First call to existsSync is for the main directory
       mockFs.existsSync.mockReturnValueOnce(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-token-nerd', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['session1.jsonl', 'session2.save'] as any);
@@ -248,7 +253,7 @@ describe('SessionTreeView', () => {
     it('should exclude .save files', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-test', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-test', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce([
@@ -272,7 +277,7 @@ describe('SessionTreeView', () => {
       // First existsSync call for directory
       mockFs.existsSync.mockReturnValueOnce(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-test', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-test', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['recent.jsonl', 'old.jsonl'] as any);
@@ -299,7 +304,7 @@ describe('SessionTreeView', () => {
       // First existsSync for directory
       mockFs.existsSync.mockReturnValueOnce(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-test', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-test', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['old.jsonl', 'new.jsonl', 'middle.jsonl'] as any);
@@ -327,7 +332,7 @@ describe('SessionTreeView', () => {
     it('should handle standard project format', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-my-awesome-app', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-my-awesome-app', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['session1.jsonl'] as any);
@@ -341,7 +346,7 @@ describe('SessionTreeView', () => {
     it('should handle home directory special case', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['session1.jsonl'] as any);
@@ -355,7 +360,7 @@ describe('SessionTreeView', () => {
     it('should handle token-nerd project correctly', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-token-nerd', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['session1.jsonl'] as any);
@@ -370,8 +375,8 @@ describe('SessionTreeView', () => {
     it('should skip projects with no sessions', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-empty', isDirectory: () => true },
-        { name: '-home-brutus-home-projects-with-sessions', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-empty', isDirectory: () => true },
+        { name: '-tmp-token-nerd-tests-projects-with-sessions', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync
@@ -391,8 +396,8 @@ describe('SessionTreeView', () => {
     it('should return all sessions from all projects sorted by modification time', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-app1', isDirectory: () => true },
-        { name: '-home-brutus-home-projects-app2', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-app1', isDirectory: () => true },
+        { name: '-tmp-token-nerd-tests-projects-app2', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync
@@ -427,7 +432,7 @@ describe('SessionTreeView', () => {
     it('should prompt user with tree view when sessions exist', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-token-nerd', isDirectory: () => true }
       ];
       mockFs.readdirSync.mockReturnValueOnce(mockDirents as any);
       mockFs.readdirSync.mockReturnValueOnce(['session1.jsonl'] as any);
@@ -450,7 +455,7 @@ describe('SessionTreeView', () => {
     it('should handle project expansion and recursively show menu', async () => {
       mockFs.existsSync.mockReturnValue(true);
       const mockDirents = [
-        { name: '-home-brutus-home-projects-token-nerd', isDirectory: () => true }
+        { name: '-tmp-token-nerd-tests-projects-token-nerd', isDirectory: () => true }
       ];
       
       // Mock the calls in the right order for the recursive behavior

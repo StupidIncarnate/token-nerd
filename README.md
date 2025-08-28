@@ -12,14 +12,11 @@ Token Nerd lets you see on a message-by-message basis how Claude's context windo
 
 Install once, restart Claude Code, and you get:
 - **Real token counter** in your statusline (`🐿️ 105,862 (68%)` so you know when auto-compact is coming)
-- **Operation tracking** - every tool call captures the information you need to figure out why your context window is suddenly fat and gorged
 - **Interactive analysis** - drill down into any session to find outputs that are total token hogs 
 
 Everything runs automatically in the background. When Claude feels slow or hits limits unexpectedly, run `token-nerd` to see exactly what happened.
  
 ### Nitty-Gritty Pieces
-- An MCP server to record data across all your Claude sessions (No need to enable on a per project basis)
-- Pre/Post Hooks to watch all tool requests and store output into Redis
 - A statusline to get early heads up of a gosh darn nut thief 
   - If you already have a statusline setup, the install will just tack onto that.
 
@@ -35,7 +32,6 @@ npm install -g token-nerd
 
 # 3. Use Claude Code normally
 # ✅ Statusline shows real token counts: 🐿️ 156,107 (100%)
-# ✅ All operations captured for analysis
 
 # 4. Analyze anytime:
 token-nerd  # Interactive analysis
@@ -93,7 +89,6 @@ token-nerd stats        # Show current Claude session stats (requires claude CLI
 ### 🔍 **Real-Time Monitoring**
 - Accurate token counts in Claude's statusline (not estimates)
 - Shows when you're approaching auto-compact context limits
-- Real-time cache efficiency metrics
 
 ### 📊 **Detailed Analysis**
 - Message-by-message token breakdown
@@ -105,7 +100,6 @@ token-nerd stats        # Show current Claude session stats (requires claude CLI
 - Cache hit/miss analysis  
 - Time gap warnings (cache expiration)
 - Drill-down into operation details
-- Linked operation analysis (tool requests → responses)
 
 ## Troubleshooting Context Issues
 
@@ -122,33 +116,6 @@ Common patterns to look for:
 
 - **Node.js**: >=18.0.0
 - **Claude Code**: Latest version
-- **Redis**: Must be installed on your system
-  ```bash
-  # macOS
-  brew install redis
-  
-  # Ubuntu/Debian
-  sudo apt install redis-server
-  
-  # Windows
-  # Use Redis for Windows or WSL
-  ```
-  
-> **Note**: Token Nerd automatically starts Redis via its MCP server - you just need Redis installed, not running.
-
-## Architecture
-
-Token Nerd uses a dual-component architecture:
-
-1. **Data Collection**: 
-   - MCP server manages Redis lifecycle
-   - Pre/post tool hooks capture operation details
-   - JSONL transcripts provide token source of truth
-
-2. **Analysis Interface**:
-   - Interactive TUI for session exploration  
-   - Real-time statusline integration
-   - Correlation engine matches operations to token burns
 
 ## Contributing
 

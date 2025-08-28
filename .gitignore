@@ -55,6 +55,7 @@ web_modules/
 .eslintcache
 
 # Optional stylelint cache
+# Optional stylelint cache
 .stylelintcache
 
 # Microbundle cache
@@ -145,10 +146,6 @@ dist
 ehthumbs.db
 Thumbs.db
 
-# Redis database files
-dump.rdb
-*.rdb
-
 # Build outputs
 build/
 dist/
@@ -178,6 +175,4 @@ temp/
 # yarn.lock
 # pnpm-lock.yaml
 
-appendonlydir
 jsonl
-mcp-config.json

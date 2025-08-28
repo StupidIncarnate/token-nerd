@@ -4,6 +4,28 @@ import * as os from 'os';
 import inquirer from 'inquirer';
 import { getCurrentTokenCount } from './token-calculator';
 
+// Dynamic project name extraction utility
+function extractProjectName(projectDir: string): string {
+  const cleanDir = projectDir.replace(/^-/, ''); // Remove leading dash
+  const homeDir = os.homedir();
+  const homeDirName = path.basename(homeDir);
+  const homeDirParent = path.basename(path.dirname(homeDir));
+  
+  // Create dynamic patterns based on actual home directory
+  const homePattern = `${homeDirParent}-${homeDirName}`;
+  const projectsPattern = `${homePattern}-projects-`;
+  
+  
+  if (cleanDir === homePattern) {
+    return 'home';
+  } else if (cleanDir.startsWith(projectsPattern)) {
+    return cleanDir.replace(projectsPattern, '');
+  } else {
+    // Fallback: take the last segment after splitting by dashes
+    return cleanDir.split('-').pop() || 'unknown';
+  }
+}
+
 interface Session {
   id: string;
   project: string;
@@ -58,21 +80,7 @@ export class SessionTreeView {
       const sessions = await this.loadSessionsForProject(projectPath, projectDir);
       
       if (sessions.length > 0) {
-        // Extract project name from directory name
-        // Handle the Claude project directory naming convention more intelligently
-        let projectName: string;
-        const cleanDir = projectDir.replace(/^-/, ''); // Remove leading dash
-        
-        if (cleanDir === 'home-brutus-home') {
-          // Special case for home directory
-          projectName = 'home';
-        } else if (cleanDir.startsWith('home-brutus-home-projects-')) {
-          // Extract the actual project name after the common prefix
-          projectName = cleanDir.replace('home-brutus-home-projects-', '');
-        } else {
-          // Fallback to original logic for other patterns
-          projectName = cleanDir.split('-').pop() || 'unknown';
-        }
+        const projectName = extractProjectName(projectDir);
 
         this.projects.set(projectName, {
           name: projectName,
@@ -98,21 +106,7 @@ export class SessionTreeView {
       // Check if active (modified in last 5 minutes)
       const isActive = (Date.now() - stats.mtime.getTime()) < 5 * 60 * 1000;
       
-      // Extract project name from directory name
-      // Handle the Claude project directory naming convention more intelligently
-      let project: string;
-      const cleanDir = projectDir.replace(/^-/, ''); // Remove leading dash
-      
-      if (cleanDir === 'home-brutus-home') {
-        // Special case for home directory
-        project = 'home';
-      } else if (cleanDir.startsWith('home-brutus-home-projects-')) {
-        // Extract the actual project name after the common prefix
-        project = cleanDir.replace('home-brutus-home-projects-', '');
-      } else {
-        // Fallback to original logic for other patterns
-        project = cleanDir.split('-').pop() || 'unknown';
-      }
+      const project = extractProjectName(projectDir);
       
       // Get accurate token count from JSONL (same method as statusline)
       const tokens = await getCurrentTokenCount(filePath);

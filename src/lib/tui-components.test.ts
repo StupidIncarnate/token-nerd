@@ -213,19 +213,6 @@ describe('tui-components', () => {
       expect(mockStdin.setEncoding).toHaveBeenCalledWith('utf8');
     });
 
-    it('should handle correlation errors gracefully', async () => {
-      mockedCorrelateOperations.mockRejectedValue(new Error('Redis connection failed'));
-      
-      try {
-        await launchTUI('error-session');
-      } catch (error) {
-        // Expected - process.exit is called
-        expect((error as Error).message).toBe('process.exit called with "0"');
-      }
-
-      expect(console.error).toHaveBeenCalledWith('Failed to load operations:', expect.any(Error));
-    });
-
     it('should pass correct parameters to correlation engine', async () => {
       mockedCorrelateOperations.mockRejectedValue(new Error('test error')); // Force quick exit
       

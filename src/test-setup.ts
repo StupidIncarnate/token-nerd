@@ -62,18 +62,7 @@ afterEach(() => {
 });
 
 // Helper function for test files to create their mock files
-export function createMockFiles() {
-  // Create mock MCP server file
-  const mcpServerPath = path.join(TEST_TEMP_DIR, 'src', 'mcp-server', 'index.ts');
-  fs.mkdirSync(path.dirname(mcpServerPath), { recursive: true });
-  fs.writeFileSync(mcpServerPath, '// Mock MCP server');
-  
-  // Create mock hook files
-  const hooksPath = path.join(TEST_TEMP_DIR, 'src', 'hooks');
-  fs.mkdirSync(hooksPath, { recursive: true });
-  fs.writeFileSync(path.join(hooksPath, 'pre-tool-use.ts'), '// Mock pre-hook');
-  fs.writeFileSync(path.join(hooksPath, 'post-tool-use.ts'), '// Mock post-hook');
-}
+export function createMockFiles() {}
 
 // Mock os.homedir to return our test directory
 jest.mock('os', () => ({

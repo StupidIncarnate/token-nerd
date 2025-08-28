@@ -1,11 +1,6 @@
 import { ComponentInstaller, InstallationError } from './types';
 import { BackupManager } from './backup-manager';
-import { McpInstaller } from './mcp-installer';
-import { HooksInstaller } from './hooks-installer';
 import { StatuslineInstaller } from './statusline-installer';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
 export class TokenNerdInstaller {
   private installers: ComponentInstaller[];
@@ -13,8 +8,6 @@ export class TokenNerdInstaller {
 
   constructor() {
     this.installers = [
-      new McpInstaller(),
-      new HooksInstaller(),
       new StatuslineInstaller()
     ];
     this.backupManager = new BackupManager();
@@ -35,28 +28,10 @@ export class TokenNerdInstaller {
         console.log();
       }
       
-      // Collect initial context stats for Redis
-      console.log('📊 Collecting initial Claude context statistics...');
-      try {
-        const { collectContextStats, storeCurrentSnapshot } = await import('../lib/stats-collector');
-        const stats = await collectContextStats();
-        
-        if (stats) {
-          await storeCurrentSnapshot(stats);
-          console.log(`✓ Initial context snapshot stored: ${stats.actualTokens.toLocaleString()} tokens`);
-        } else {
-          console.log('⚠️  No stats collected - Claude may not be running or accessible');
-        }
-      } catch (error) {
-        console.log('⚠️  Could not collect initial stats:', (error as Error).message);
-        console.log('   This is normal if Claude is not currently running');
-      }
-      
       console.log('\n✅ Token Nerd installation complete!\n');
       console.log('🔄 IMPORTANT: Restart Claude to enable token tracking:');
       console.log('   1. Exit claude session (Ctrl+C or type "exit")');
       console.log('   2. Run: claude');
-      console.log();
       console.log('After restart, use "token-nerd" anytime to analyze your token usage!');
       
     } catch (error) {
@@ -95,12 +70,6 @@ export class TokenNerdInstaller {
     // Clean up data and backups
     console.log('🗑️  Cleaning up token-nerd data...');
     try {
-      // Clean up Redis data (session operations, etc.)
-      await this.cleanupRedisData();
-      
-      // Clean up response files directory
-      await this.cleanupResponseFiles();
-      
       // Clean up installation state and old backups
       await this.backupManager.cleanupOldBackups(0); // Remove all backups
       const state = await this.backupManager.getInstallationState();
@@ -116,7 +85,7 @@ export class TokenNerdInstaller {
     
     if (errors.length === 0) {
       console.log('✅ Token Nerd cleanup complete!');
-      console.log('🔄 Restart Claude to stop the MCP server');
+      console.log('🔄 Restart Claude to finish cleanup');
     } else {
       console.log(`⚠️  Cleanup completed with ${errors.length} error(s)`);
       console.log('Some manual cleanup may be needed');
@@ -214,78 +183,6 @@ export class TokenNerdInstaller {
     } else {
       console.log('\n✅ Token Nerd installation repaired successfully');
       console.log('🔄 Restart Claude to ensure all changes take effect');
-    }
-  }
-
-  private async cleanupRedisData(): Promise<void> {
-    try {
-      // Try to connect to Redis and clean up token-nerd related data
-      const { createClient } = await import('redis');
-      const client = createClient({
-        url: 'redis://localhost:6379',
-        socket: {
-          connectTimeout: 500,
-          reconnectStrategy: () => false // Don't retry
-        }
-      });
-
-      await client.connect();
-      
-      // Find and delete all token-nerd session keys
-      const sessionKeys = await client.keys('session:*:operations:*');
-      const timelineKeys = await client.keys('session:*:timeline');
-      const messageKeys = await client.keys('message:*:operations');
-      
-      const allKeys = [...sessionKeys, ...timelineKeys, ...messageKeys];
-      
-      if (allKeys.length > 0) {
-        await client.del(allKeys);
-        console.log(`✓ Cleaned up ${allKeys.length} Redis keys`);
-      } else {
-        console.log('✓ No Redis data to clean up');
-      }
-      
-      await client.quit();
-    } catch (error) {
-      // Redis might not be running or accessible - this is okay during uninstall
-      console.log('✓ Redis not accessible (this is normal during uninstall)');
-    }
-  }
-
-  private async cleanupResponseFiles(): Promise<void> {
-    const responsesDir = path.join(os.homedir(), '.claude', 'token-nerd');
-    
-    if (fs.existsSync(responsesDir)) {
-      try {
-        // Calculate total size for user info
-        let totalSize = 0;
-        let fileCount = 0;
-        
-        const calculateSize = (dir: string) => {
-          const entries = fs.readdirSync(dir, { withFileTypes: true });
-          for (const entry of entries) {
-            const entryPath = path.join(dir, entry.name);
-            if (entry.isDirectory()) {
-              calculateSize(entryPath);
-            } else {
-              totalSize += fs.statSync(entryPath).size;
-              fileCount++;
-            }
-          }
-        };
-        
-        calculateSize(responsesDir);
-        
-        // Remove the directory
-        fs.rmSync(responsesDir, { recursive: true, force: true });
-        
-        const sizeMB = (totalSize / (1024 * 1024)).toFixed(1);
-        console.log(`✓ Cleaned up ${fileCount} response files (${sizeMB} MB)`);
-      } catch (error) {
-        console.log(`⚠️  Could not clean up response files: ${error}`);
-      }
-    } else {
-      console.log('✓ No response files to clean up');
     }
   }
 }

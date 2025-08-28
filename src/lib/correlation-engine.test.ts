@@ -1,8 +1,5 @@
-import { correlateOperations, Operation, Bundle, JsonlMessage, resetRedisClient, getHookOperations, getLinkedOperations } from './correlation-engine';
-import { createClient } from 'redis';
+import { correlateOperations, Bundle, getLinkedOperations } from './correlation-engine';
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
 // Mock console methods to prevent test output clutter
 const mockConsoleWarn = jest.fn();
@@ -16,23 +13,6 @@ afterAll(() => {
   console.warn = originalConsoleWarn;
 });
 
-// Mock Redis client
-jest.mock('redis', () => ({
-  createClient: jest.fn(() => ({
-    connect: jest.fn(),
-    disconnect: jest.fn(),
-    isOpen: true,
-    keys: jest.fn(),
-    get: jest.fn(),
-    multi: jest.fn(() => ({
-      set: jest.fn(),
-      sAdd: jest.fn(),
-      zAdd: jest.fn(),
-      exec: jest.fn()
-    }))
-  }))
-}));
-
 // Mock fs
 jest.mock('fs', () => ({
   readFileSync: jest.fn(),
@@ -41,322 +21,27 @@ jest.mock('fs', () => ({
   mkdirSync: jest.fn()
 }));
 
-// Mock stats-collector to avoid startup context in tests
-jest.mock('./stats-collector', () => ({
-  getSnapshotForSession: jest.fn(() => Promise.resolve(null))
-}));
-
 // Mock jsonl-utils
 jest.mock('./jsonl-utils', () => ({
   parseJsonl: jest.fn(() => [])
 }));
 
-const mockedRedis = jest.mocked(createClient);
 const mockedFs = jest.mocked(fs);
 const { parseJsonl } = require('./jsonl-utils');
 const mockedParseJsonl = jest.mocked(parseJsonl);
 
 describe('correlation-engine', () => {
-  let mockRedisClient: any;
+
   
   beforeEach(() => {
     jest.clearAllMocks();
-    resetRedisClient(); // Reset the module-level Redis client
-    
-    mockRedisClient = {
-      connect: jest.fn(),
-      disconnect: jest.fn(),
-      isOpen: true,
-      keys: jest.fn(),
-      get: jest.fn(),
-      multi: jest.fn(() => ({
-        set: jest.fn(),
-        sAdd: jest.fn(),
-        zAdd: jest.fn(),
-        exec: jest.fn()
-      }))
-    };
-    mockedRedis.mockReturnValue(mockRedisClient);
-  });
-
-  describe('getHookOperations', () => {
-    it('should fetch and combine request/response operations from Redis', async () => {
-      const mockTimestamp = Date.now();
-      const sessionId = 'test-session';
-      
-      mockRedisClient.keys
-        .mockImplementation((pattern: string) => {
-          if (pattern.includes(':request')) {
-            return Promise.resolve([`session:${sessionId}:operations:${mockTimestamp}:request`]);
-          }
-          if (pattern.includes(':response')) {
-            return Promise.resolve([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-          }
-          return Promise.resolve([]);
-        });
-      
-      mockRedisClient.get
-        .mockImplementation((key: string) => {
-          if (key.includes(':request')) {
-            return Promise.resolve(JSON.stringify({
-              tool: 'Read',
-              params: { file_path: '/test/file.ts' },
-              timestamp: mockTimestamp,
-              session_id: sessionId,
-              sequence: 1
-            }));
-          }
-          if (key.includes(':response')) {
-            return Promise.resolve(JSON.stringify({
-              response: 'file content',
-              responseSize: 100,
-              message_id: 'msg-123',
-              sequence: 1,
-              usage: { input_tokens: 50, output_tokens: 25 }
-            }));
-          }
-          return Promise.resolve(null);
-        });
-      
-      const result = await getHookOperations(sessionId);
-      
-      expect(result).toHaveLength(1);
-      expect(result[0]).toMatchObject({
-        tool: 'Read',
-        params: { file_path: '/test/file.ts' },
-        response: 'file content',
-        responseSize: 100,
-        session_id: sessionId,
-        sequence: 1,
-        allocation: 'estimated',
-        details: 'file.ts'
-      });
-    });
-
-    it('should handle short session IDs by searching for full matches', async () => {
-      const shortSessionId = 'abc12345';
-      const fullSessionId = 'abc12345-def6-7890-ghij-klmnopqrstuv';
-      const mockTimestamp = Date.now();
-      
-      // First call returns empty (no exact match)
-      // Second call returns matches for the expanded search
-      mockRedisClient.keys
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([`session:${fullSessionId}:operations:${mockTimestamp}:request`])
-        .mockResolvedValueOnce([`session:${fullSessionId}:operations:${mockTimestamp}:response`]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Edit',
-          params: { file_path: '/test.js' },
-          session_id: fullSessionId,
-          sequence: 1
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          response: { success: true },
-          responseSize: 20,
-          sequence: 1
-        }));
-      
-      const result = await getHookOperations(shortSessionId);
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].session_id).toBe(fullSessionId);
-      expect(result[0].details).toBe('test.js');
-    });
-
-    it('should handle file references in large responses', async () => {
-      const sessionId = 'test-session';
-      const mockTimestamp = Date.now();
-      const filePath = '/tmp/large-response.json';
-      
-      mockRedisClient.keys
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:request`])
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Bash',
-          params: { command: 'npm test' },
-          session_id: sessionId,
-          sequence: 1
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          response: `file://${filePath}`,
-          responseSize: 50000,
-          sequence: 1
-        }));
-      
-      // Mock file reading
-      mockedFs.readFileSync.mockReturnValue(JSON.stringify({ output: 'test results' }));
-      
-      const result = await getHookOperations(sessionId);
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].response).toEqual({ output: 'test results' });
-      expect(mockedFs.readFileSync).toHaveBeenCalledWith(filePath, 'utf8');
-    });
-
-    it('should handle file read errors gracefully', async () => {
-      const sessionId = 'test-session';
-      const mockTimestamp = Date.now();
-      const filePath = '/tmp/missing-file.json';
-      
-      mockRedisClient.keys
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:request`])
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Glob',
-          params: { pattern: '**/*.ts' },
-          session_id: sessionId,
-          sequence: 1
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          response: `file://${filePath}`,
-          responseSize: 50000,
-          sequence: 1
-        }));
-      
-      // Mock file read error
-      mockedFs.readFileSync.mockImplementation(() => {
-        throw new Error('File not found');
-      });
-      
-      const result = await getHookOperations(sessionId);
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].response).toBe(`[Large response stored in ${filePath}]`);
-    });
-
-    it('should return empty array when Redis is unavailable', async () => {
-      mockRedisClient.connect.mockRejectedValue(new Error('Connection refused'));
-      
-      const result = await getHookOperations('test-session');
-      
-      expect(result).toEqual([]);
-    });
-
-    it('should format operation details for Read tool', async () => {
-      const sessionId = 'test-read';
-      const mockTimestamp = Date.now();
-      
-      mockRedisClient.keys
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:request`])
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Read',
-          params: { file_path: '/very/long/path/to/file.ts' },
-          session_id: sessionId,
-          sequence: 1
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          response: 'test response',
-          responseSize: 100,
-          sequence: 1
-        }));
-      
-      const result = await getHookOperations(sessionId);
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].details).toBe('file.ts');
-    });
-
-    it('should format operation details for Bash tool with long command', async () => {
-      const sessionId = 'test-bash';
-      const mockTimestamp = Date.now();
-      
-      mockRedisClient.keys
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:request`])
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Bash',
-          params: { command: 'very long command that should be truncated because it exceeds thirty characters' },
-          session_id: sessionId,
-          sequence: 1
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          response: 'test response',
-          responseSize: 100,
-          sequence: 1
-        }));
-      
-      const result = await getHookOperations(sessionId);
-      
-      expect(result).toHaveLength(1);
-      expect(result[0].details).toBe('very long command that should ...');
-    });
   });
 
   describe('correlateOperations', () => {
-    it('should return empty array when no operations or messages found', async () => {
-      mockRedisClient.keys.mockResolvedValue([]);
-      mockedFs.existsSync.mockReturnValue(false);
-      
-      const result = await correlateOperations('test-session');
-      
-      expect(result).toEqual([]);
-    });
-
-    it('should return empty when Redis operations exist but no JSONL data', async () => {
-      const mockTimestamp = Date.now();
-      const sessionId = 'test-session';
-      
-      // Mock Redis keys to return both request and response keys
-      mockRedisClient.keys
-        .mockImplementation((pattern: string) => {
-          if (pattern.includes(':request')) {
-            return Promise.resolve([`session:${sessionId}:operations:${mockTimestamp}:request`]);
-          }
-          if (pattern.includes(':response')) {
-            return Promise.resolve([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-          }
-          return Promise.resolve([]);
-        });
-      
-      // Mock Redis get to return proper data for each key
-      mockRedisClient.get
-        .mockImplementation((key: string) => {
-          if (key.includes(':request')) {
-            return Promise.resolve(JSON.stringify({
-              tool: 'Read',
-              params: { file_path: '/test/file.ts' },
-              timestamp: mockTimestamp,
-              session_id: sessionId
-            }));
-          }
-          if (key.includes(':response')) {
-            return Promise.resolve(JSON.stringify({
-              tool: 'Read',
-              response: 'file content',
-              responseSize: 12,
-              message_id: 'msg-123',
-              usage: { input_tokens: 100, output_tokens: 50 }
-            }));
-          }
-          return Promise.resolve(null);
-        });
-      
-      mockedFs.existsSync.mockReturnValue(false);
-      
-      const result = await correlateOperations(sessionId);
-      
-      // Should return empty because JSONL is required now
-      expect(result).toHaveLength(0);
-    });
 
     it('should process different message types from JSONL', async () => {
       const sessionId = 'test-session';
       const jsonlPath = '/test/session.jsonl';
-      
-      // No Redis operations for this test
-      mockRedisClient.keys.mockResolvedValue([]);
       
       // Mock JSONL with different message types
       mockedParseJsonl.mockReturnValue([
@@ -471,8 +156,6 @@ describe('correlation-engine', () => {
       const sessionId = 'test-session';
       const jsonlPath = '/test/session.jsonl';
       
-      mockRedisClient.keys.mockResolvedValue([]);
-      
       const baseTime = new Date('2024-01-01T10:00:00Z').getTime();
       const gapTime = new Date('2024-01-01T10:10:00Z').getTime(); // 10 minute gap
       
@@ -517,42 +200,7 @@ describe('correlation-engine', () => {
       const mockTimestamp = Date.now();
       const sessionId = 'test-session';
       const messageId = 'msg-123';
-      
-      // Mock Redis operations
-      mockRedisClient.keys
-        .mockImplementation((pattern: string) => {
-          if (pattern.includes(':request')) {
-            return Promise.resolve([`session:${sessionId}:operations:${mockTimestamp}:request`]);
-          }
-          if (pattern.includes(':response')) {
-            return Promise.resolve([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-          }
-          return Promise.resolve([]);
-        });
-      
-      mockRedisClient.get
-        .mockImplementation((key: string) => {
-          if (key.includes(':request')) {
-            return Promise.resolve(JSON.stringify({
-              tool: 'Edit',
-              params: { file_path: '/test/file.ts', old_string: 'old', new_string: 'new' },
-              timestamp: mockTimestamp,
-              session_id: sessionId,
-              sequence: 1
-            }));
-          }
-          if (key.includes(':response')) {
-            return Promise.resolve(JSON.stringify({
-              tool: 'Edit',
-              response: { success: true },
-              responseSize: 20,
-              message_id: messageId,
-              sequence: 1
-            }));
-          }
-          return Promise.resolve(null);
-        });
-      
+
       // Mock JSONL file
       const jsonlPath = `/home/test/.claude/projects/${sessionId}.jsonl`;
       mockedParseJsonl.mockReturnValue([
@@ -587,23 +235,6 @@ describe('correlation-engine', () => {
       const sessionId = 'test-session';
       const filePath = '/test/response.json';
       
-      mockRedisClient.keys
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:request`])
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Bash',
-          params: { command: 'npm test' },
-          timestamp: mockTimestamp,
-          session_id: sessionId
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Bash',
-          response: `file://${filePath}`,
-          responseSize: 50000
-        }));
-      
       mockedFs.existsSync.mockReturnValue(false);
       mockedFs.readFileSync.mockReturnValue('{"output": "test results"}');
       
@@ -613,88 +244,9 @@ describe('correlation-engine', () => {
       expect(result).toHaveLength(0);
     });
 
-    it.skip('should distribute tokens proportionally for multiple operations in one message', async () => {
-      const mockTimestamp1 = Date.now();
-      const mockTimestamp2 = Date.now() + 1000;
-      const sessionId = 'test-session';
-      const messageId = 'msg-bundle';
-      
-      // Mock two operations in the same message
-      mockRedisClient.keys
-        .mockResolvedValueOnce([
-          `session:${sessionId}:operations:${mockTimestamp1}:request`,
-          `session:${sessionId}:operations:${mockTimestamp2}:request`
-        ])
-        .mockResolvedValueOnce([
-          `session:${sessionId}:operations:${mockTimestamp1}:response`,
-          `session:${sessionId}:operations:${mockTimestamp2}:response`
-        ]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Read',
-          params: { file_path: '/test/small.ts' },
-          timestamp: mockTimestamp1,
-          session_id: sessionId
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Write',
-          params: { file_path: '/test/large.ts', content: 'content' },
-          timestamp: mockTimestamp2,
-          session_id: sessionId
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Read',
-          response: 'small file content',
-          responseSize: 100,
-          message_id: messageId
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Write',
-          response: { success: true },
-          responseSize: 300, // 3x larger response
-          message_id: messageId
-        }));
-      
-      // Mock JSONL with total tokens for the message
-      mockedParseJsonl.mockReturnValue([
-        {
-          id: messageId,
-          timestamp: mockTimestamp1,
-          usage: { input_tokens: 300, output_tokens: 100 },
-          content: {
-            type: 'assistant',
-            message: {
-              role: 'assistant',
-              content: 'Assistant response'
-            }
-          }
-        }
-      ]);
-      
-      const result = await correlateOperations(sessionId, '/test/session.jsonl');
-      
-      expect(result).toHaveLength(1);
-      const bundle = result[0];
-      expect(bundle.operations).toHaveLength(2);
-      expect(bundle.totalTokens).toBe(800); // Total from both operations
-      
-      // Check that we have the expected operations
-      const readOp = bundle.operations.find(op => op.tool === 'Read');
-      const writeOp = bundle.operations.find(op => op.tool === 'Write');
-      
-      expect(readOp).toBeDefined();
-      expect(writeOp).toBeDefined();
-      expect(readOp?.allocation).toBe('exact');
-      expect(writeOp?.allocation).toBe('exact');
-    });
-
     it('should handle synthetic operations from JSONL when no hook data available', async () => {
       const sessionId = 'test-session';
       const messageId = 'msg-synthetic';
-      
-      // No Redis operations
-      mockRedisClient.keys.mockResolvedValue([]);
       
       // Mock JSONL with usage data
       const jsonlPath = `/test/${sessionId}.jsonl`;
@@ -726,36 +278,9 @@ describe('correlation-engine', () => {
       expect(syntheticOp.details).toBe('message');
     });
 
-    it('should handle Redis connection failure gracefully', async () => {
-      mockRedisClient.connect.mockRejectedValue(new Error('Redis unavailable'));
-      mockedFs.existsSync.mockReturnValue(false);
-      
-      const result = await correlateOperations('test-session');
-      
-      expect(result).toEqual([]);
-    });
-
     it('should format operation details correctly for different tools', async () => {
-      const mockTimestamp = Date.now();
       const sessionId = 'test-session';
-      
-      mockRedisClient.keys
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:request`])
-        .mockResolvedValueOnce([`session:${sessionId}:operations:${mockTimestamp}:response`]);
-      
-      mockRedisClient.get
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Bash',
-          params: { command: 'npm run build --verbose --production' },
-          timestamp: mockTimestamp,
-          session_id: sessionId
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          tool: 'Bash',
-          response: 'build output',
-          responseSize: 1000
-        }));
-      
+
       mockedFs.existsSync.mockReturnValue(false);
       
       const result = await correlateOperations(sessionId);

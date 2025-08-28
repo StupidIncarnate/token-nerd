@@ -53,7 +53,7 @@ class TokenAnalyzer {
       
       if (this.state.bundles.length === 0) {
         console.log(`\nNo operations found for session ${this.sessionId.slice(0, 8)}`);
-        console.log('Either no hooks data available or session has no recorded operations.');
+        console.log('Session has no recorded operations.');
         console.log('Press any key to exit...');
         await this.waitForKey();
         this.cleanup();

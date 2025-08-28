@@ -1,9 +1,5 @@
-import { createClient } from 'redis';
-import * as fs from 'fs';
 import * as path from 'path';
 import { parseJsonl, JsonlMessage } from './jsonl-utils';
-import { getSnapshotForSession } from './stats-collector';
-
 export { JsonlMessage };
 
 export interface Operation {
@@ -45,136 +41,6 @@ export interface Bundle {
   totalTokens: number;
 }
 
-
-let redisClient: any = null;
-
-// Export for testing
-export function resetRedisClient() {
-  redisClient = null;
-}
-
-async function getRedisClient() {
-  if (!redisClient || !redisClient.isOpen) {
-    redisClient = createClient({
-      url: 'redis://localhost:6379',
-      socket: {
-        connectTimeout: 1000,
-        reconnectStrategy: (retries) => retries > 3 ? false : Math.min(retries * 50, 500)
-      }
-    });
-    try {
-      await redisClient.connect();
-    } catch (error) {
-      console.warn('Warning: Redis not available, using file-based fallback');
-      return null;
-    }
-  }
-  return redisClient;
-}
-
-export async function getHookOperations(sessionId: string): Promise<Operation[]> {
-  const redis = await getRedisClient();
-  if (!redis) return [];
-
-  try {
-    // Handle both short session IDs (first 8 chars) and full session IDs
-    // First try exact match
-    let requestKeys = await redis.keys(`session:${sessionId}:operations:*:request`);
-    let responseKeys = await redis.keys(`session:${sessionId}:operations:*:response`);
-    
-    // If no exact match and sessionId looks like short version, search for full session ID
-    if (requestKeys.length === 0 && sessionId.length === 8) {
-      const allSessionKeys = await redis.keys(`session:${sessionId}*:operations:*:request`);
-      requestKeys = allSessionKeys;
-      const allResponseKeys = await redis.keys(`session:${sessionId}*:operations:*:response`);
-      responseKeys = allResponseKeys;
-    }
-    
-    // Create a map of sequence -> operations
-    const operationMap = new Map<number, Partial<Operation>>();
-    
-    // Process request data
-    for (const key of requestKeys) {
-      const timestamp = key.split(':')[3];
-      const data = await redis.get(key);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (parsed.sequence !== undefined) {
-          operationMap.set(parsed.sequence, {
-            tool: parsed.tool,
-            params: parsed.params,
-            timestamp: parseInt(timestamp),
-            session_id: parsed.session_id,
-            sequence: parsed.sequence
-          });
-        }
-      }
-    }
-    
-    // Process response data
-    for (const key of responseKeys) {
-      const timestamp = key.split(':')[3];
-      const data = await redis.get(key);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (parsed.sequence !== undefined) {
-          const existing = operationMap.get(parsed.sequence) || {};
-          
-          let response = parsed.response;
-          // Handle file references
-          if (typeof response === 'string' && response.startsWith('file://')) {
-            const filePath = response.replace('file://', '');
-            try {
-              const fileContent = fs.readFileSync(filePath, 'utf8');
-              response = JSON.parse(fileContent);
-            } catch (error) {
-              response = `[Large response stored in ${filePath}]`;
-            }
-          }
-          
-          operationMap.set(parsed.sequence, {
-            ...existing,
-            response,
-            responseSize: parsed.responseSize,
-            message_id: parsed.message_id,
-            usage: parsed.usage,
-            sequence: parsed.sequence,
-            timestamp: existing.timestamp || parseInt(timestamp)
-          });
-        }
-      }
-    }
-    
-    // Convert to full operations
-    const operations: Operation[] = [];
-    operationMap.forEach((op, sequence) => {
-      if (op.tool && op.timestamp) {
-        operations.push({
-          tool: op.tool,
-          params: op.params || {},
-          response: op.response || {},
-          responseSize: op.responseSize || 0,
-          timestamp: op.timestamp,
-          session_id: op.session_id || sessionId,
-          message_id: op.message_id,
-          sequence: op.sequence,
-          usage: op.usage,
-          tokens: 0, // Will be filled by correlation
-          generationCost: 0, // Will be filled by correlation
-          contextGrowth: 0, // Will be filled by correlation
-          allocation: 'estimated',
-          details: formatOperationDetails(op.tool, op.params)
-        });
-      }
-    });
-    
-    return operations.sort((a, b) => a.timestamp - b.timestamp);
-  } catch (error) {
-    console.warn('Error fetching hook operations:', error);
-    return [];
-  }
-}
-
 function formatOperationDetails(tool: string, params: any): string {
   switch (tool.toLowerCase()) {
     case 'read':
@@ -200,55 +66,14 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
   // Get ALL messages from JSONL (including user messages)
   const allMessages = jsonlPath ? parseJsonl(jsonlPath) : [];
   
-  // Get operations from hooks (supplementary data)
-  const operations = await getHookOperations(sessionId);
-  
   if (allMessages.length === 0) {
     return [];
   }
   
-  // Get context snapshot for this session to show startup cost
-  const contextSnapshot = await getSnapshotForSession(sessionId);
-  
   // Process ALL messages to understand the full conversation flow
   const bundles: Bundle[] = [];
   const processedMessageIds = new Set<string>();  // Track processed message IDs to avoid duplicates
-  
-  // Add context startup cost as first bundle if available
-  if (contextSnapshot && contextSnapshot.stats) {
-    const sessionStartTime = allMessages.length > 0 ? allMessages[0].timestamp - 1000 : contextSnapshot.timestamp;
-    
-    const startupOperation: Operation = {
-      tool: 'Context',
-      params: {},
-      response: contextSnapshot.stats.display,
-      responseSize: contextSnapshot.stats.display.length,
-      timestamp: sessionStartTime,
-      session_id: sessionId,
-      tokens: contextSnapshot.stats.actualTokens,
-      generationCost: 0,
-      contextGrowth: contextSnapshot.stats.actualTokens,
-      allocation: 'exact',
-      details: `${Math.round(contextSnapshot.stats.actualTokens/1000)}k init cost`,
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_creation_input_tokens: contextSnapshot.stats.actualTokens,
-        cache_read_input_tokens: 0
-      }
-    };
-    
-    bundles.push({
-      id: 'startup-context',
-      timestamp: sessionStartTime,
-      operations: [startupOperation],
-      totalTokens: contextSnapshot.stats.actualTokens
-    });
-  }
-  
-  // Group messages by assistant responses and their associated user/tool messages
-  let currentBundle: Bundle | null = null;
-  let toolOperationIndex = 0;
+
   let lastTimestamp = 0;
   
   for (const msg of allMessages) {

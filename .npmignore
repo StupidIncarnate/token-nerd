@@ -25,11 +25,6 @@ temp/
 *.tmp
 *.temp
 
-# Redis files
-dump.rdb
-*.rdb
-appendonlydir/
-
 # JSONL test data
 jsonl/
 
@@ -49,12 +44,10 @@ Thumbs.db
 
 # Development docs that users don't need
 CLAUDE.md
-docs/ARCHITECTURE.md
+docs
 
 # Keep these important files:
 # README.md
 # package.json
 # dist/
 # docs/JSONL-TOKEN-FIELDS-EXPLAINED.md (user-facing)
-
-mcp-config.json

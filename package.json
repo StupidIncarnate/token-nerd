@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "npx tsc --noEmit", 
+    "typecheck": "npx tsc --noEmit",
     "test": "jest",
     "prepublishOnly": "npm run test && npm run build",
     "postinstall": "tsx src/postinstall.ts",
@@ -27,7 +27,6 @@
     "ink": "^4.0.0",
     "inquirer": "^9.0.0",
     "react": "^18.0.0",
-    "redis": "^4.0.0",
     "tsx": "^4.0.0"
   },
   "devDependencies": {
