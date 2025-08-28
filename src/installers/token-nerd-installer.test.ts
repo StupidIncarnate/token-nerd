@@ -36,11 +36,12 @@ describe('TokenNerdInstaller', () => {
   });
 
   describe('install', () => {
-    it('should install all components successfully', async () => {
+    it('should complete installation successfully with no installers', async () => {
       await installer.install();
       
       const status = await installer.getStatus();
-      expect(status['statusline']).toBe(true);
+      // No installers configured, so status should be empty
+      expect(Object.keys(status)).toEqual([]);
     });
 
     it('should handle partial installation and rollback properly', async () => {
@@ -64,11 +65,12 @@ describe('TokenNerdInstaller', () => {
       await installer.install();
     });
 
-    it('should uninstall all components', async () => {
+    it('should complete uninstall with no installers', async () => {
       await installer.uninstall();
       
       const status = await installer.getStatus();
-      expect(status['statusline']).toBe(false);
+      // No installers configured, so status should be empty
+      expect(Object.keys(status)).toEqual([]);
     });
 
     it('should clean up installation state', async () => {
@@ -83,34 +85,34 @@ describe('TokenNerdInstaller', () => {
   });
 
   describe('getStatus', () => {
-    it('should return false for all components when nothing installed', async () => {
+    it('should return empty status when no installers configured', async () => {
       const status = await installer.getStatus();
-      expect(status['statusline']).toBe(false);
+      expect(Object.keys(status)).toEqual([]);
     });
   });
 
   describe('validate', () => {
-    it('should return false for all components when nothing installed', async () => {
+    it('should return empty validation when no installers configured', async () => {
       const validation = await installer.validate();
-
-      expect(validation['statusline']).toBe(false);
+      expect(Object.keys(validation)).toEqual([]);
     });
 
-    it('should validate installed components', async () => {
+    it('should validate with no installers configured', async () => {
       await installer.install();
       
       const validation = await installer.validate();
-      expect(validation['statusline']).toBe(true);
+      expect(Object.keys(validation)).toEqual([]);
     });
   });
 
   describe('isFullyInstalled', () => {
-    it('should return false when nothing is installed', async () => {
+    it('should return true when no installers configured', async () => {
       const result = await installer.isFullyInstalled();
-      expect(result).toBe(false);
+      // With no installers, everything is "fully installed"
+      expect(result).toBe(true);
     });
 
-    it('should return true when fully installed', async () => {
+    it('should return true after install with no installers', async () => {
       await installer.install();
       
       const result = await installer.isFullyInstalled();
@@ -119,12 +121,13 @@ describe('TokenNerdInstaller', () => {
   });
 
   describe('isFullyValid', () => {
-    it('should return false when nothing is installed', async () => {
+    it('should return true when no installers configured', async () => {
       const result = await installer.isFullyValid();
-      expect(result).toBe(false);
+      // With no installers, everything is "fully valid"
+      expect(result).toBe(true);
     });
 
-    it('should return true when fully installed and valid', async () => {
+    it('should return true after install with no installers', async () => {
       await installer.install();
       
       const result = await installer.isFullyValid();

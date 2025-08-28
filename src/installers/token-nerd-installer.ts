@@ -7,8 +7,9 @@ export class TokenNerdInstaller {
   private backupManager: BackupManager;
 
   constructor() {
+    // Statusline installation is now manual - see README for setup instructions
     this.installers = [
-      new StatuslineInstaller()
+      // new StatuslineInstaller()
     ];
     this.backupManager = new BackupManager();
   }
@@ -22,17 +23,21 @@ export class TokenNerdInstaller {
       // Clean up old backups first
       await this.backupManager.cleanupOldBackups();
       
+      if (this.installers.length === 0) {
+        console.log('ℹ️  No automatic installers configured - using manual setup mode\n');
+      }
+      
       for (const installer of this.installers) {
         await installer.install();
         installedComponents.push(installer.getName());
         console.log();
       }
       
-      console.log('\n✅ Token Nerd installation complete!\n');
-      console.log('🔄 IMPORTANT: Restart Claude to enable token tracking:');
-      console.log('   1. Exit claude session (Ctrl+C or type "exit")');
-      console.log('   2. Run: claude');
-      console.log('After restart, use "token-nerd" anytime to analyze your token usage!');
+      console.log('✅ Token Nerd installation complete!\n');
+      console.log('📖 NEXT STEP: Set up your statusline for real-time token tracking:');
+      console.log('   See README.md for complete setup instructions');
+      console.log('   Quick setup: https://github.com/StupidIncarnate/token-nerd#statusline-setup');
+      console.log('\nAfter setup, use "token-nerd" anytime to analyze your token usage!');
       
     } catch (error) {
       console.error('❌ Installation failed:', error instanceof Error ? error.message : error);

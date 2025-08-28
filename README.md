@@ -10,25 +10,20 @@ Token Nerd lets you see on a message-by-message basis how Claude's context windo
 
 ## How It Works
 
-Install once, restart Claude Code, and you get:
+Install the tool and set up your statusline to get:
 - **Real token counter** in your statusline (`🐿️ 105,862 (68%)` so you know when auto-compact is coming)
 - **Interactive analysis** - drill down into any session to find outputs that are total token hogs 
 
-Everything runs automatically in the background. When Claude feels slow or hits limits unexpectedly, run `token-nerd` to see exactly what happened.
- 
-### Nitty-Gritty Pieces
-- A statusline to get early heads up of a gosh darn nut thief 
-  - If you already have a statusline setup, the install will just tack onto that.
+Once configured, everything runs automatically in the background. When Claude feels slow or hits limits unexpectedly, run `token-nerd` to see exactly what happened.
 
 
 ## Quick Start
 
 ```bash
-# 1. Install globally (automatic setup)
+# 1. Install globally
 npm install -g token-nerd
 
-# 2. Restart Claude Code
-# Everything is configured automatically
+# 2. Set up statusline manually (see Statusline Setup below)
 
 # 3. Use Claude Code normally
 # ✅ Statusline shows real token counts: 🐿️ 156,107 (100%)
@@ -77,11 +72,48 @@ token-nerd sessions     # List all sessions (flat view)
 token-nerd stats        # Show current Claude session stats (requires claude CLI)
 ```
 
-### Statusline Integration
+## Statusline Setup
+
+Add real-time token counting to your Claude Code statusline:
+
+### Option 1: New Statusline (if you don't have one)
+
+Create `~/.claude/statusline-command.sh`:
+
 ```bash
-# Automatically configured during installation
-# Shows token counts in Claude Code statusline as: 🐿️ 150,107 (97%)
-# No manual setup required - works immediately after npm install + Claude restart
+#!/bin/bash
+# Basic Claude Code statusline with token-nerd integration
+TOKEN_NERD_OUTPUT=$(cat | npx token-nerd --statusline)
+echo "${TOKEN_NERD_OUTPUT}"
+```
+
+Then add to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "/home/yourusername/.claude/statusline-command.sh"
+  }
+}
+```
+
+### Option 2: Enhance Existing Statusline
+
+If you already have a statusline, add this line before your final `echo`:
+
+```bash
+TOKEN_NERD_OUTPUT=$(echo "$json" | npx token-nerd --statusline)
+```
+
+And modify your echo to include: `| $TOKEN_NERD_OUTPUT`
+
+**Result**: Shows token counts as `🐿️ 150,107 (97%)`
+
+### Statusline Testing
+```bash
+# Test the statusline command:
+echo '{"transcript_path":"~/.claude/projects/session.jsonl"}' | npx token-nerd --statusline
 ```
 
 ### Cleanup/Uninstall
@@ -158,4 +190,4 @@ MIT © StupidIncarnate
 
 ---
 
-**Note**: This tool is designed specifically for Claude Code and requires proper installation to function. The automatic setup handles all configuration during `npm install`.
+**Note**: This tool is designed specifically for Claude Code. After installing with `npm install -g token-nerd`, follow the Statusline Setup section above to see context window changes in your statusline.
