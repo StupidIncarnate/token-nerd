@@ -83,7 +83,8 @@ Create `~/.claude/statusline-command.sh`:
 ```bash
 #!/bin/bash
 # Basic Claude Code statusline with token-nerd integration
-TOKEN_NERD_OUTPUT=$(cat | npx token-nerd --statusline)
+input=$(cat)
+TOKEN_NERD_OUTPUT=$(echo "$input" | token-nerd --statusline)
 echo "${TOKEN_NERD_OUTPUT}"
 ```
 
@@ -103,7 +104,7 @@ Then add to `~/.claude/settings.json`:
 If you already have a statusline, add this line before your final `echo`:
 
 ```bash
-TOKEN_NERD_OUTPUT=$(echo "$json" | npx token-nerd --statusline)
+TOKEN_NERD_OUTPUT=$(echo "$json" | token-nerd --statusline)
 ```
 
 And modify your echo to include: `| $TOKEN_NERD_OUTPUT`
@@ -113,7 +114,7 @@ And modify your echo to include: `| $TOKEN_NERD_OUTPUT`
 ### Statusline Testing
 ```bash
 # Test the statusline command:
-echo '{"transcript_path":"~/.claude/projects/session.jsonl"}' | npx token-nerd --statusline
+echo '{"transcript_path":"~/.claude/projects/session.jsonl"}' | token-nerd --statusline
 ```
 
 ### Cleanup/Uninstall
