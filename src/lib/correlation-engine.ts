@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { parseJsonl, JsonlMessage } from './jsonl-utils';
+import { estimateTokensFromContent } from './token-calculator';
 export { JsonlMessage };
 
 export interface Operation {
@@ -12,6 +13,7 @@ export interface Operation {
   message_id?: string;
   sequence?: number;
   tool_use_id?: string;  // Links tool requests to responses
+  contentPartIndex?: number; // For multi-part messages, which part this represents
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -32,6 +34,11 @@ export interface Operation {
   timeGap?: number;  // Seconds since last message
   allocation: 'exact' | 'proportional' | 'estimated';
   details: string;
+  // Sub-agent support
+  isSidechain?: boolean;  // True if this is part of a sub-agent execution
+  subAgentId?: string;    // Unique identifier for the sub-agent session
+  subAgentType?: string;  // Type of sub-agent (e.g., 'general-purpose')
+  parentTaskId?: string;  // Tool use ID of the parent Task operation
 }
 
 export interface Bundle {
@@ -39,6 +46,12 @@ export interface Bundle {
   timestamp: number;
   operations: Operation[];
   totalTokens: number;
+  // Sub-agent support
+  isSubAgent?: boolean;     // True if this bundle represents a sub-agent
+  subAgentType?: string;    // Type of sub-agent
+  parentTaskId?: string;    // Tool use ID of the parent Task operation
+  operationCount?: number;  // Number of operations in sub-agent
+  duration?: number;        // Duration in milliseconds
 }
 
 function formatOperationDetails(tool: string, params: any): string {
@@ -73,6 +86,7 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
   // Process ALL messages to understand the full conversation flow
   const bundles: Bundle[] = [];
   const processedMessageIds = new Set<string>();  // Track processed message IDs to avoid duplicates
+  const messageContentPartIndex = new Map<string, number>(); // Track content part index for multi-part messages
 
   let lastTimestamp = 0;
   
@@ -103,12 +117,14 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         session_id: sessionId,
         message_id: msg.id,
         tool_use_id: toolUseId,
-        tokens: Math.ceil(JSON.stringify(msg.content).length / 4),
+        tokens: estimateTokensFromContent(JSON.stringify(msg.content)),
         generationCost: 0,
         contextGrowth: 0,
         timeGap,
         allocation: 'estimated',
-        details: 'Hidden system prompt/context'
+        details: 'Hidden system prompt/context',
+        // Sub-agent support
+        isSidechain: msg.isSidechain || false
       };
       
       bundles.push({
@@ -131,12 +147,14 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         timestamp: msg.timestamp,
         session_id: sessionId,
         message_id: msg.id,
-        tokens: Math.ceil(userText.length / 4), // Rough estimate
+        tokens: estimateTokensFromContent(userText), // Rough estimate
         generationCost: 0,
         contextGrowth: 0, // Will be counted in next assistant message
         timeGap,
         allocation: 'estimated',
-        details: userText.replace(/\s+/g, ' ').substring(0, 50) + (userText.length > 50 ? '...' : '')
+        details: userText.replace(/\s+/g, ' ').substring(0, 50) + (userText.length > 50 ? '...' : ''),
+        // Sub-agent support
+        isSidechain: msg.isSidechain || false
       };
       
       bundles.push({
@@ -148,8 +166,19 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
     } else if (isToolResult) {
       // Tool response - THIS is often the hidden context gorger!
       const toolResult = msg.content?.message?.content?.[0];
-      const resultSize = toolResult?.content?.length || 0;
-      const estimatedTokens = Math.ceil(resultSize / 4);
+      
+      // Calculate actual response size - toolResult.content might be a string or array
+      let resultSize = 0;
+      if (toolResult?.content) {
+        if (typeof toolResult.content === 'string') {
+          resultSize = toolResult.content.length;
+        } else {
+          // If it's an array or object, stringify it to get the full size
+          resultSize = JSON.stringify(toolResult.content).length;
+        }
+      }
+      
+      const estimatedTokens = estimateTokensFromContent(resultSize);
       
       const toolResponseOp: Operation = {
         tool: 'ToolResponse',
@@ -164,7 +193,9 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         generationCost: 0,
         contextGrowth: 0,  // Don't count estimated values in context growth
         allocation: 'estimated',
-        details: `${(resultSize / 1024).toFixed(1)}KB → ~${estimatedTokens.toLocaleString()} tokens`
+        details: `${(resultSize / 1024).toFixed(1)}KB → ~${estimatedTokens.toLocaleString()} est`,
+        // Sub-agent support
+        isSidechain: msg.isSidechain || false
       };
       
       bundles.push({
@@ -174,13 +205,15 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         totalTokens: estimatedTokens
       });
     } else if (isAssistant && msg.usage) {
-      // Skip duplicate message IDs (streaming chunks of same message)
-      if (msg.id && processedMessageIds.has(msg.id)) {
+      // Create unique key combining message ID and content hash for deduplication
+      const msgContent = msg.content?.message?.content;
+      const contentKey = msg.id + '-' + JSON.stringify(msgContent || '').substring(0, 50);
+      
+      // Skip only true duplicates (same ID and same content)
+      if (processedMessageIds.has(contentKey)) {
         continue;
       }
-      if (msg.id) {
-        processedMessageIds.add(msg.id);
-      }
+      processedMessageIds.add(contentKey);
       
       // Assistant message - process with all metrics
       const contextGrowth = msg.usage?.cache_creation_input_tokens || 0;
@@ -230,6 +263,21 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         }
       }
       
+      // For multi-part messages, determine which content part this represents
+      let contentPartIndex: number | undefined;
+      if (messageContent && Array.isArray(messageContent) && messageContent.length === 1) {
+        // This message contains exactly one content part - track the order for this message ID
+        const messageId = msg.id;
+        if (!messageContentPartIndex.has(messageId)) {
+          messageContentPartIndex.set(messageId, 0);
+          contentPartIndex = 0;
+        } else {
+          const currentIndex = messageContentPartIndex.get(messageId)! + 1;
+          messageContentPartIndex.set(messageId, currentIndex);
+          contentPartIndex = currentIndex;
+        }
+      }
+      
       const operation: Operation = {
         tool,
         params,
@@ -247,7 +295,10 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         cacheEfficiency,
         timeGap,
         allocation: 'exact',
-        details
+        details,
+        // Sub-agent support
+        isSidechain: msg.isSidechain || false,
+        contentPartIndex
       };
       
       
@@ -260,12 +311,163 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
     }
   }
   
+  // Separate main operations from sidechain operations
+  const sidechainBundles = bundles.filter(b => b.operations[0].isSidechain);
+  const mainBundles = bundles.filter(b => !b.operations[0].isSidechain);
+  
+  // Mark sidechain bundles as sub-agent operations and link to parent tasks
+  const taskBundles = mainBundles.filter(b => {
+    const op = b.operations[0];
+    return op.tool === 'Assistant' && op.response && Array.isArray(op.response) &&
+           op.response.some((content: any) => content.type === 'tool_use' && content.name === 'Task');
+  });
+  
+  // Create sub-agent bundles by grouping sidechain operations by task
+  const subAgentBundles: Bundle[] = [];
+  
+  for (const taskBundle of taskBundles) {
+    const taskOp = taskBundle.operations[0];
+    const taskUses = (taskOp.response as any[]).filter((c: any) => c.type === 'tool_use' && c.name === 'Task');
+    
+    for (const taskUse of taskUses) {
+      // Find the ToolResponse for this specific task to get the session boundaries
+      const taskResponse = allMessages.find(msg => {
+        const isToolResult = (msg.content?.type === 'user' || msg.content?.message?.role === 'user') && 
+                           msg.content?.message?.content?.[0]?.type === 'tool_result';
+        return isToolResult && msg.content.message.content[0].tool_use_id === taskUse.id;
+      });
+      
+      if (!taskResponse) continue;
+      
+      // Find sidechain operations that belong to this specific task
+      // Use the Task response content to identify which sidechain operations belong to this task
+      const taskResponseContent = taskResponse.content.message.content[0].content;
+      
+      // Parse the task response to extract session information or other identifiers
+      let taskSessionInfo: any = null;
+      try {
+        if (Array.isArray(taskResponseContent) && taskResponseContent[0]?.type === 'text') {
+          // Try to extract session info from the response text
+          const responseText = taskResponseContent[0].text || '';
+          // This is a heuristic - look for patterns that might identify the specific task
+          taskSessionInfo = { responseText, taskId: taskUse.id };
+        }
+      } catch (e) {
+        // Fallback to timestamp-based grouping if parsing fails
+      }
+      
+      // Filter sidechain operations by looking at parentUuid chain
+      // Find the initial sidechain message that matches this task's prompt
+      const taskDescription = taskUse.input?.description || '';
+      const taskPrompt = taskUse.input?.prompt || '';
+      
+      const taskSidechainBundles = sidechainBundles.filter(b => {
+        const op = b.operations[0];
+        
+        // Check if this sidechain operation is related to this specific task
+        // Look for operations that contain similar content to the task description/prompt
+        if (taskDescription.includes('src/installers') && op.details && op.details.includes('installers')) {
+          return true;
+        }
+        if (taskDescription.includes('src/lib') && op.details && op.details.includes('lib')) {
+          return true;
+        }
+        
+        // Fallback: use the LS tool path parameter if available
+        if (op.tool === 'Assistant' && op.response && Array.isArray(op.response)) {
+          const lsToolUse = op.response.find(c => c.type === 'tool_use' && c.name === 'LS');
+          if (lsToolUse && lsToolUse.input?.path) {
+            const path = lsToolUse.input.path;
+            if (taskDescription.includes('src/installers') && path.includes('installers')) {
+              return true;
+            }
+            if (taskDescription.includes('src/lib') && path.includes('lib')) {
+              return true;
+            }
+          }
+        }
+        
+        // Also check ToolResponse operations for path information
+        if (op.tool === 'ToolResponse' && op.response && typeof op.response === 'string') {
+          if (taskDescription.includes('src/installers') && op.response.includes('installers')) {
+            return true;
+          }
+          if (taskDescription.includes('src/lib') && op.response.includes('lib')) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      if (taskSidechainBundles.length > 0) {
+        // Mark all operations in these bundles as belonging to this sub-agent
+        const allSubAgentOps: Operation[] = [];
+        taskSidechainBundles.forEach(bundle => {
+          bundle.operations.forEach(op => {
+            op.parentTaskId = taskUse.id;
+            op.subAgentType = taskUse.input?.subagent_type || 'general-purpose';
+            allSubAgentOps.push(op);
+          });
+        });
+        
+        // Sort by timestamp
+        allSubAgentOps.sort((a, b) => a.timestamp - b.timestamp);
+        
+        // Create sub-agent bundle
+        const subAgentBundle: Bundle = {
+          id: `subagent-${taskUse.id}`,
+          timestamp: allSubAgentOps[0].timestamp,
+          operations: allSubAgentOps,
+          totalTokens: allSubAgentOps.reduce((sum, op) => sum + op.tokens, 0),
+          isSubAgent: true,
+          subAgentType: taskUse.input?.subagent_type || 'general-purpose',
+          parentTaskId: taskUse.id,
+          operationCount: allSubAgentOps.length,
+          duration: allSubAgentOps.length > 1 ? allSubAgentOps[allSubAgentOps.length - 1].timestamp - allSubAgentOps[0].timestamp : 0
+        };
+        
+        // Set description based on task
+        const description = taskUse.input?.description || 'Sub-agent task';
+        if (allSubAgentOps.length > 0) {
+          allSubAgentOps[0].details = description;
+        }
+        
+        subAgentBundles.push(subAgentBundle);
+      }
+    }
+  }
+  
+  // Return only main bundles + sub-agent bundles (no individual sidechain bundles)
+  const finalBundles: Bundle[] = [...mainBundles];
+  
+  // Insert sub-agent bundles after their parent Task operations
+  for (let i = 0; i < finalBundles.length; i++) {
+    const bundle = finalBundles[i];
+    const op = bundle.operations[0];
+    
+    if (op.tool === 'Assistant' && op.response && Array.isArray(op.response)) {
+      const taskUses = op.response.filter((c: any) => c.type === 'tool_use' && c.name === 'Task');
+      
+      // Insert sub-agent bundles after this task bundle
+      let insertIndex = i + 1;
+      for (const taskUse of taskUses) {
+        const subAgentBundle = subAgentBundles.find(b => b.parentTaskId === taskUse.id);
+        if (subAgentBundle) {
+          finalBundles.splice(insertIndex, 0, subAgentBundle);
+          insertIndex++; // Adjust for next insertion
+          i++; // Skip the inserted bundle in main loop
+        }
+      }
+    }
+  }
+  
   // Post-process to enrich ToolResponse details with filenames from linked operations
-  for (const bundle of bundles) {
+  for (const bundle of finalBundles) {
     for (const op of bundle.operations) {
       if (op.tool === 'ToolResponse' && op.tool_use_id) {
         // Find the assistant message that created this tool_use_id
-        const linkedOps = getLinkedOperations(bundles, op.tool_use_id);
+        const linkedOps = getLinkedOperations(finalBundles, op.tool_use_id);
         const assistantOp = linkedOps.find(linkedOp => linkedOp.tool === 'Assistant');
         
         if (assistantOp && assistantOp.response && Array.isArray(assistantOp.response)) {
@@ -282,7 +484,7 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
     }
   }
   
-  return bundles.sort((a, b) => a.timestamp - b.timestamp);
+  return finalBundles.sort((a, b) => a.timestamp - b.timestamp);
 }
 
 // Find all operations linked by tool_use_id

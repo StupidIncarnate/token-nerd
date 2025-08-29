@@ -441,19 +441,19 @@ describe('token-calculator', () => {
 
       const result = estimateTokensFromContent(content);
 
-      expect(result).toBe(13); // Math.ceil(52 / 4) = 13
+      expect(result).toBe(15); // Math.ceil(52 / 3.7) = 15
     });
 
     it('should handle empty strings', () => {
       const result = estimateTokensFromContent('');
 
-      expect(result).toBe(0); // Math.ceil(0 / 4) = 0
+      expect(result).toBe(0); // Math.ceil(0 / 3.7) = 0
     });
 
     it('should handle single character', () => {
       const result = estimateTokensFromContent('a');
 
-      expect(result).toBe(1); // Math.ceil(1 / 4) = 1
+      expect(result).toBe(1); // Math.ceil(1 / 3.7) = 1
     });
 
     it('should handle exactly divisible by 4', () => {
@@ -461,7 +461,7 @@ describe('token-calculator', () => {
 
       const result = estimateTokensFromContent(content);
 
-      expect(result).toBe(1); // Math.ceil(4 / 4) = 1
+      expect(result).toBe(2); // Math.ceil(4 / 3.7) = 2
     });
 
     it('should round up partial tokens', () => {
@@ -469,7 +469,7 @@ describe('token-calculator', () => {
 
       const result = estimateTokensFromContent(content);
 
-      expect(result).toBe(2); // Math.ceil(5 / 4) = 2
+      expect(result).toBe(2); // Math.ceil(5 / 3.7) = 2
     });
 
     it('should handle large content', () => {
@@ -477,7 +477,7 @@ describe('token-calculator', () => {
 
       const result = estimateTokensFromContent(content);
 
-      expect(result).toBe(2500); // 10000 / 4 = 2500
+      expect(result).toBe(2703); // Math.ceil(10000 / 3.7) = 2703
     });
 
     it('should handle unicode characters', () => {
@@ -485,15 +485,15 @@ describe('token-calculator', () => {
 
       const result = estimateTokensFromContent(content);
 
-      expect(result).toBe(Math.ceil(content.length / 4)); // Use actual string length
+      expect(result).toBe(Math.ceil(content.length / 3.7)); // Use actual string length
     });
 
     it('should handle newlines and whitespace', () => {
-      const content = 'Line 1\nLine 2\t\tIndented'; // 22 chars including whitespace
+      const content = 'Line 1\nLine 2\t\tIndented'; // 24 chars including whitespace
 
       const result = estimateTokensFromContent(content);
 
-      expect(result).toBe(6); // Math.ceil(22 / 4) = 6
+      expect(result).toBe(7); // Math.ceil(24 / 3.7) = 7
     });
   });
 });

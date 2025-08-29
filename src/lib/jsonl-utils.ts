@@ -16,6 +16,7 @@ export interface JsonlMessage {
     };
   };
   content?: any;
+  isSidechain?: boolean; // True if this message is part of a sub-agent execution
 }
 
 export function parseJsonl(filePath: string): JsonlMessage[] {
@@ -36,12 +37,19 @@ export function parseJsonl(filePath: string): JsonlMessage[] {
           const usage = parsed.usage || parsed.message?.usage;
           const messageId = parsed.message?.id || parsed.id || parsed.uuid;
           
-          return {
+          const result: JsonlMessage = {
             id: messageId,
             timestamp: new Date(parsed.timestamp || 0).getTime(),
             usage: usage,
             content: parsed
-          } as JsonlMessage;
+          };
+          
+          // Only add isSidechain if it exists in parsed data
+          if (parsed.isSidechain !== undefined) {
+            result.isSidechain = parsed.isSidechain;
+          }
+          
+          return result;
         } catch (error) {
           return null;
         }

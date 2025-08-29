@@ -99,6 +99,7 @@ program
 program
   .option('--statusline', 'Output formatted token count for statusline (reads JSON from stdin)')
   .option('--session <id>', 'Select specific session')
+  .option('--message-id <id>', 'Go directly to detail view for specific message (requires --session)')
   .option('--current', 'Use current project session')
   .option('--cleanup', 'Remove all configurations and exit')
   .action(async (options) => {
@@ -155,7 +156,23 @@ program
         actualJsonlPath = undefined;
       }
       
-      const exitCode = await launchTUI(options.session, actualJsonlPath);
+      // Parse message ID with optional bracket notation
+      let messageId: string | undefined;
+      let contentPart: number | undefined;
+      
+      if (options.messageId) {
+        const bracketMatch = options.messageId.match(/^([^[\]]+)(?:\[(\d+)\])?$/);
+        if (bracketMatch) {
+          messageId = bracketMatch[1];
+          contentPart = bracketMatch[2] ? parseInt(bracketMatch[2], 10) : undefined;
+        } else {
+          console.error(`❌ Invalid message ID format: ${options.messageId}`);
+          console.error('Expected format: msg_id or msg_id[N] where N is the content part index');
+          process.exit(1);
+        }
+      }
+      
+      const exitCode = await launchTUI(options.session, actualJsonlPath, messageId, contentPart);
       process.exit(exitCode);
     } else {
       // No session specified - will be handled by default behavior below

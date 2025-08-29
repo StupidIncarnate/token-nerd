@@ -158,9 +158,12 @@ export function calculateRemainingCapacity(currentTotal: number, contextWindowLi
 }
 
 /**
- * Rough estimation of tokens from content string
- * Using simple heuristic: ~4 chars per token (Claude's approximation)
+ * Rough estimation of tokens from content string or size
+ * Using simple heuristic: ~3.7 chars per token (consistent across codebase)
  */
-export function estimateTokensFromContent(content: string): number {
-  return Math.ceil(content.length / 4);
+export function estimateTokensFromContent(content: string): number;
+export function estimateTokensFromContent(size: number): number;
+export function estimateTokensFromContent(input: string | number): number {
+  const length = typeof input === 'string' ? input.length : input;
+  return Math.ceil(length / 3.7);
 }

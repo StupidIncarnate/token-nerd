@@ -1,6 +1,7 @@
 // Simplified terminal-based implementation for token analysis
 import { correlateOperations, Bundle, Operation, getLinkedOperations } from './correlation-engine';
-import { getCurrentTokenCount, calculateCumulativeTotal, calculateRemainingCapacity } from './token-calculator';
+import { getCurrentTokenCount, calculateCumulativeTotal, calculateRemainingCapacity, estimateTokensFromContent } from './token-calculator';
+import { GenericListView, ListItem, ListView, ListActions } from './generic-list-view';
 import * as readline from 'readline';
 
 type SortMode = 'time' | 'tokens' | 'operation';
@@ -12,17 +13,33 @@ interface TerminalState {
   selectedIndex: number;
   expanded: Set<string>;
   viewingDetails: Bundle | null;
+  viewingSubAgent: Bundle | null; // New state for sub-agent operation list view
   detailScrollOffset: number;
   shouldExit: boolean;
   exitCode: number;
+}
+
+// Utility function to calculate operation tokens for sorting
+function getOperationTokens(op: Operation): number {
+  if (op.tool === 'ToolResponse') {
+    // Use estimated tokens for ToolResponse (~2,099 est)
+    return estimateTokensFromContent(op.responseSize);
+  } else if (op.tool === 'Assistant' && op.generationCost > 0) {
+    // For Assistant messages, use output tokens (78 out)
+    return op.generationCost;
+  } else {
+    // For User messages and others, use the operation tokens
+    return op.tokens || 0;
+  }
 }
 
 class TokenAnalyzer {
   private state: TerminalState;
   private rl: readline.Interface;
   private sessionId: string;
+  private listView: GenericListView | null = null;
 
-  constructor(sessionId: string, private jsonlPath?: string) {
+  constructor(sessionId: string, private jsonlPath?: string, private directMessageId?: string, private directContentPart?: number) {
     this.sessionId = sessionId;
     this.state = {
       bundles: [],
@@ -31,6 +48,7 @@ class TokenAnalyzer {
       selectedIndex: 0,
       expanded: new Set(),
       viewingDetails: null,
+      viewingSubAgent: null,
       detailScrollOffset: 0,
       shouldExit: false,
       exitCode: 0
@@ -64,6 +82,11 @@ class TokenAnalyzer {
         return;
       }
 
+      // Check if we should go directly to detail view
+      if (this.directMessageId) {
+        this.goToDirectDetailView();
+      }
+
       await this.render();
       this.setupKeyHandlers();
       await this.mainLoop();
@@ -83,20 +106,6 @@ class TokenAnalyzer {
           // Sort by per-operation token impact, not cumulative context
           const aOp = a.operations[0];
           const bOp = b.operations[0];
-          
-          // Get per-operation token cost that matches what user sees
-          const getOperationTokens = (op: any) => {
-            if (op?.tool === 'ToolResponse') {
-              // Use estimated tokens for ToolResponse (~2,099 est)
-              return Math.ceil(op.responseSize / 3.7);
-            } else if (op?.tool === 'Assistant' && op?.generationCost > 0) {
-              // For Assistant messages, use output tokens (78 out)
-              return op.generationCost;
-            } else {
-              // For User messages and others, use the operation tokens
-              return op?.tokens || 0;
-            }
-          };
           
           const aValue = getOperationTokens(aOp);
           const bValue = getOperationTokens(bOp);
@@ -133,16 +142,6 @@ class TokenAnalyzer {
     });
     
     // Sort by individual operation token value
-    const getOperationTokens = (op: Operation) => {
-      if (op.tool === 'ToolResponse') {
-        return Math.ceil(op.responseSize / 3.7);
-      } else if (op.tool === 'Assistant' && op.generationCost > 0) {
-        return op.generationCost;
-      } else {
-        return op.tokens || 0;
-      }
-    };
-    
     allOperations.sort((a, b) => {
       const aValue = getOperationTokens(a.operation);
       const bValue = getOperationTokens(b.operation);
@@ -171,6 +170,58 @@ class TokenAnalyzer {
     return items;
   }
 
+  private transformBundlesToListItems(): ListItem[] {
+    const flatItems = this.state.sortMode === 'tokens' 
+      ? this.getFlatOperations()
+      : this.getFlatItems();
+      
+    const contextTotals = this.calculateContextTotals();
+    const contextDeltas = this.calculateContextDeltas();
+    
+    return flatItems.map((item, index) => {
+      const bundle = item.bundle;
+      const op = item.operation || bundle.operations[0];
+      const contextTotal = contextTotals.get(bundle.id) || 0;
+      const contextDelta = contextDeltas.get(bundle.id) || 0;
+      
+      // Format context display
+      let contextStr: string;
+      if (index > 0) {
+        const prevItem = flatItems[index - 1];
+        const prevContextTotal = contextTotals.get(prevItem.bundle.id) || 0;
+        contextStr = contextTotal === prevContextTotal ? '---,---' : contextTotal.toLocaleString('en-US', { 
+          minimumIntegerDigits: 6, 
+          useGrouping: true 
+        });
+      } else {
+        contextStr = contextTotal.toLocaleString('en-US', { 
+          minimumIntegerDigits: 6, 
+          useGrouping: true 
+        });
+      }
+      
+      // Get icon and title
+      const icon = this.getOperationIcon(op, bundle.isSubAgent);
+      const toolDisplay = this.getToolDisplay(op, bundle.isSubAgent);
+      const title = `${icon} ${toolDisplay}: ${op.details}`;
+      
+      // Get token metadata
+      const metadata = this.getTokenMetadata(op, bundle, contextDelta);
+      
+      return {
+        id: item.operation?.contentPartIndex !== undefined ? `${bundle.id}[${item.operation.contentPartIndex}]` : bundle.id,
+        timestamp: item.operation?.timestamp || bundle.timestamp,
+        icon,
+        title,
+        subtitle: contextStr,
+        metadata,
+        isChild: item.isChild,
+        canExpand: !item.operation && bundle.operations.length > 1,
+        isExpanded: this.state.expanded.has(bundle.id)
+      };
+    });
+  }
+
   private getFlatItems(): Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number; isChild?: boolean }> {
     const items: Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number; isChild?: boolean }> = [];
     const sortedBundles = this.getSortedBundles();
@@ -191,17 +242,24 @@ class TokenAnalyzer {
         return;
       }
       
+      // Skip sub-agent bundles here - they'll be shown as children after their parent Task
+      if (bundle.isSubAgent) {
+        return;
+      }
+      
       items.push({ type: 'bundle', bundle, index: bundleIndex });
       
-      // If this is an Assistant message with tool calls, find related ToolResponse bundles
+      // If this is an Assistant message with tool calls, find related ToolResponse bundles and sub-agents
       if (op.tool === 'Assistant' && op.response && Array.isArray(op.response)) {
         const toolUses = op.response.filter((c: any) => c.type === 'tool_use');
         
         if (toolUses.length > 0) {
           // Find ToolResponse bundles that match these tool_use_ids
           const relatedResponses: Bundle[] = [];
+          const relatedSubAgents: Bundle[] = [];
           
           for (const toolUse of toolUses) {
+            // Find regular tool response bundles (for all tool types including Task)
             const responseBundle = sortedBundles.find(b => {
               const responseOp = b.operations[0];
               return responseOp.tool === 'ToolResponse' && responseOp.tool_use_id === toolUse.id;
@@ -211,15 +269,26 @@ class TokenAnalyzer {
               relatedResponses.push(responseBundle);
               processedToolResponses.add(responseBundle.id);
             }
+            
+            // Also find sub-agent bundles for Task tools
+            if (toolUse.name === 'Task') {
+              const subAgentBundle = sortedBundles.find(b => 
+                b.isSubAgent && b.parentTaskId === toolUse.id
+              );
+              if (subAgentBundle) {
+                relatedSubAgents.push(subAgentBundle);
+              }
+            }
           }
           
-          // Add related responses as children (sorted by timestamp)
-          relatedResponses
+          // Combine responses and sub-agents, then sort by timestamp for proper chronological order
+          const allChildren: Bundle[] = [...relatedResponses, ...relatedSubAgents];
+          allChildren
             .sort((a, b) => a.timestamp - b.timestamp)
-            .forEach((responseBundle, childIndex) => {
+            .forEach((childBundle, childIndex) => {
               items.push({ 
                 type: 'bundle', 
-                bundle: responseBundle, 
+                bundle: childBundle, 
                 index: bundleIndex * 100 + childIndex + 1,
                 isChild: true
               });
@@ -244,6 +313,100 @@ class TokenAnalyzer {
     return items;
   }
 
+  private calculateContextTotals(): Map<string, number> {
+    const contextTotals = new Map<string, number>();
+    let runningTotal = 0;
+    
+    this.state.bundles.forEach(b => {
+      const op = b.operations[0];
+      if (op.usage && op.allocation === 'exact') {
+        runningTotal = calculateCumulativeTotal(op.usage);
+      }
+      contextTotals.set(b.id, runningTotal);
+    });
+    
+    return contextTotals;
+  }
+
+  private calculateContextDeltas(): Map<string, number> {
+    const contextDeltas = new Map<string, number>();
+    let previousTotal = 0;
+    
+    this.state.bundles.forEach(b => {
+      const op = b.operations[0];
+      let contextDelta = 0;
+      
+      if (op.usage && op.allocation === 'exact') {
+        const currentTotal = calculateCumulativeTotal(op.usage);
+        contextDelta = currentTotal - previousTotal;
+        previousTotal = currentTotal;
+      }
+      
+      contextDeltas.set(b.id, contextDelta);
+    });
+    
+    return contextDeltas;
+  }
+
+  private getOperationIcon(op: Operation, isSubAgent?: boolean): string {
+    if (isSubAgent) {
+      return '🤖‍💻';
+    }
+    
+    switch(op.tool) {
+      case 'User': return '👤';
+      case 'ToolResponse': return '📥';
+      case 'Assistant': return '🤖';
+      case 'Context': return '📊';
+      case 'Read': return '📖';
+      case 'Write': return '✏️';
+      case 'Edit': return '📝';
+      case 'Bash': return '💻';
+      case 'LS': return '📁';
+      case 'Glob': return '🔍';
+      case 'Grep': return '🔎';
+      default: return '⚙️';
+    }
+  }
+
+  private getToolDisplay(op: Operation, isSubAgent?: boolean): string {
+    if (isSubAgent) {
+      return 'Sub-Agent';
+    }
+    
+    return op.tool === 'Assistant' ? 'Main Agent' : op.tool;
+  }
+
+  private getTokenMetadata(op: Operation, bundle: Bundle, contextDelta: number): string {
+    if (bundle.isSubAgent) {
+      return '-';
+    } else if (op.tool === 'ToolResponse') {
+      const sizeKB = (op.responseSize / 1024).toFixed(1);
+      const estimatedTokens = estimateTokensFromContent(op.responseSize);
+      return `[${sizeKB}KB → ~${estimatedTokens.toLocaleString()} est]`;
+    } else if (op.tool === 'User') {
+      return `~${op.tokens} est`;
+    } else if (contextDelta > 0) {
+      if (this.state.sortMode === 'tokens') {
+        if (op.generationCost > 0) {
+          return `(${op.generationCost.toLocaleString()} out)`;
+        } else {
+          return `${op.tokens.toLocaleString()} tokens`;
+        }
+      } else {
+        let result = `+${contextDelta.toLocaleString()} actual`;
+        if (op.generationCost > 0) {
+          result += ` (${op.generationCost.toLocaleString()} out)`;
+        }
+        return result;
+      }
+    } else if (op.generationCost > 0) {
+      return `(${op.generationCost.toLocaleString()} out)`;
+    } else {
+      return `${op.tokens.toLocaleString()} tokens`;
+    }
+  }
+
   private clearScreen(): void {
     process.stdout.write('\x1Bc'); // Reset terminal
     process.stdout.write('\x1B[2J\x1B[3J'); // Clear screen and scrollback
@@ -255,208 +418,260 @@ class TokenAnalyzer {
       this.renderDetails();
       return;
     }
+    
+    if (this.state.viewingSubAgent) {
+      // Use generic list view for sub-agent view
+      const items = this.transformSubAgentOperationsToListItems(this.state.viewingSubAgent);
+      const header = `SUB-AGENT: ${this.state.viewingSubAgent.operations[0].details || 'Sub-agent operations'} | ${this.state.viewingSubAgent.operations.length} Operations`;
+      
+      const listView: ListView = {
+        header,
+        items,
+        selectedIndex: this.state.selectedIndex,
+      };
 
-    this.clearScreen();
+      const actions: ListActions = {
+        onSelect: (item, index) => this.handleSubAgentSelect(item, index),
+        onBack: () => { 
+          this.state.viewingSubAgent = null; 
+          this.state.selectedIndex = 0; 
+        },
+        onQuit: () => { this.state.shouldExit = true; this.state.exitCode = 0; },
+        onSelectionChange: (newIndex) => { this.state.selectedIndex = newIndex; }
+      };
 
-    // Get session total from JSONL (not sum of individual operations)
+      if (!this.listView) {
+        this.listView = new GenericListView(listView, actions);
+      } else {
+        this.listView.updateView(listView);
+        this.listView.updateActions(actions);
+      }
+
+      this.listView.render();
+      return;
+    }
+
+    // Use generic list view for main view
+    const items = this.transformBundlesToListItems();
     const totalTokens = this.jsonlPath ? await getCurrentTokenCount(this.jsonlPath) : 0;
     
-    // Choose view type based on sort mode
-    const flatItems = this.state.sortMode === 'tokens' 
-      ? this.getFlatOperations()  // Flat view for token sorting
-      : this.getFlatItems();      // Hierarchical view for time/operation sorting
-    
-    // Pagination for long lists
+    // Pagination
     const itemsPerPage = 20;
     const currentPage = Math.floor(this.state.selectedIndex / itemsPerPage);
     const startIndex = currentPage * itemsPerPage;
-    const endIndex = Math.min(startIndex + itemsPerPage, flatItems.length);
-    const visibleItems = flatItems.slice(startIndex, endIndex);
-
-    // Header
+    const endIndex = Math.min(startIndex + itemsPerPage, items.length);
+    
     const sortDirection = this.state.sortAscending ? '↑' : '↓';
-    console.log(`┌${'─'.repeat(98)}┐`);
-    console.log(`│ Session: ${this.sessionId.slice(0, 8)} | Total: ${totalTokens.toLocaleString()} tokens | Sort: ${this.state.sortMode.toUpperCase()} ${sortDirection}`.padEnd(99) + '│');
-    console.log(`│ Page ${currentPage + 1}/${Math.ceil(flatItems.length / itemsPerPage)} | Items ${startIndex + 1}-${endIndex} of ${flatItems.length}`.padEnd(99) + '│');
-    console.log(`└${'─'.repeat(98)}┘`);
+    const header = `Session: ${this.sessionId.slice(0, 8)} | Total: ${totalTokens.toLocaleString()} tokens | Sort: ${this.state.sortMode.toUpperCase()} ${sortDirection}`;
     
-    // Column headers
-    console.log('');
-    console.log('   Time     [ Context ] | Token Impact              | Operation & Details');
-    console.log('─'.repeat(100));
+    const listView: ListView = {
+      header,
+      items,
+      selectedIndex: this.state.selectedIndex,
+      sortMode: this.state.sortMode,
+      sortAscending: this.state.sortAscending,
+      pagination: {
+        currentPage: currentPage + 1,
+        totalPages: Math.ceil(items.length / itemsPerPage),
+        itemsPerPage,
+        startIndex,
+        endIndex
+      }
+    };
 
-    // Calculate actual context window deltas (what each message adds)
-    const contextTotals = new Map<string, number>();
-    const contextDeltas = new Map<string, number>();
-    
-    let previousTotal = 0;
-    let runningTotal = 0;
-    
-    this.state.bundles.forEach(b => {
-      const op = b.operations[0];
-      let contextDelta = 0;
-      
-      if (op.usage && op.allocation === 'exact') {
-        // For running total, use full cumulative calculation for statusline consistency
-        const currentTotal = calculateCumulativeTotal(op.usage);
-        
-        // Calculate REAL context window delta (difference from previous total)
-        contextDelta = currentTotal - previousTotal;
-        
-        runningTotal = currentTotal;
-        previousTotal = currentTotal;
-      }
-      // For messages without usage (User messages), keep the last known total
-      
-      // Store both values for display
-      contextTotals.set(b.id, runningTotal);
-      contextDeltas.set(b.id, contextDelta);
-    });
-    
-    // Operations list (paginated)
-    visibleItems.forEach((item, i) => {
-      const actualIndex = startIndex + i;
-      const isSelected = actualIndex === this.state.selectedIndex;
-      const prefix = isSelected ? '→ ' : '  ';
-      
-      if (item.type === 'bundle') {
-        const bundle = item.bundle;
-        // In flat token view, we display individual operations, not bundles
-        const op = item.operation || bundle.operations[0];
-        const expandIcon = (!item.operation && bundle.operations.length > 1) 
-          ? (this.state.expanded.has(bundle.id) ? '▼' : '▶') 
-          : ' ';
-        
-        const timeStr = new Date(item.operation?.timestamp || bundle.timestamp).toLocaleTimeString();
-        const contextTotal = contextTotals.get(bundle.id) || 0;
-        
-        // Compare with previous line's context total to decide whether to show actual number or [---,---]
-        let contextStr: string;
-        if (i > 0) {
-          const prevItem = visibleItems[i - 1];
-          const prevContextTotal = contextTotals.get(prevItem.bundle.id) || 0;
-          
-          if (contextTotal === prevContextTotal) {
-            contextStr = '---,---'.padStart(8);
-          } else {
-            contextStr = contextTotal.toLocaleString('en-US', { 
-              minimumIntegerDigits: 6, 
-              useGrouping: true 
-            }).padStart(8);
-          }
-        } else {
-          // First item always shows the actual number
-          contextStr = contextTotal.toLocaleString('en-US', { 
-            minimumIntegerDigits: 6, 
-            useGrouping: true 
-          }).padStart(8);
-        }
-        
-        const contextDelta = contextDeltas.get(bundle.id) || 0;
-        const capacity = calculateRemainingCapacity(contextTotal);
-        
-        let description: string;
-        let tokensDisplay: string;
-        let icon: string;
-        
-        if (item.operation || bundle.operations.length === 1) {
-          // Use the specific operation (flat view) or the single bundle operation (hierarchical view)
-          
-          // Choose icon based on tool type
-          switch(op.tool) {
-            case 'User': icon = '👤'; break;
-            case 'ToolResponse': icon = '📥'; break;
-            case 'Assistant': icon = '🤖'; break;
-            case 'Context': icon = '📊'; break;
-            case 'Read': icon = '📖'; break;
-            case 'Write': icon = '✏️'; break;
-            case 'Edit': icon = '📝'; break;
-            case 'Bash': icon = '💻'; break;
-            case 'LS': icon = '📁'; break;
-            default: icon = '🔧';
-          }
-          
-          // Add cache expiration warning to description if present
-          const cacheWarning = op.details.includes('⚠️') ? '' : 
-                              (op.timeGap && op.timeGap > 300) ? ' ⚠️' : '';
-          description = `${icon} ${op.tool}: ${op.details}${cacheWarning}`;
-          
-          // Format tokens based on operation type - show actual context delta
-          if (op.tool === 'ToolResponse') {
-            // Show size for tool responses - use improved tokenization estimate
-            const sizeKB = (op.responseSize / 1024).toFixed(1);
-            // Better estimate: JSON/code ~= 3.5 chars/token, plain text ~= 4 chars/token
-            // Use 3.7 as average for mixed content
-            const estimatedTokens = Math.ceil(op.responseSize / 3.7);
-            tokensDisplay = `[${sizeKB}KB → ~${estimatedTokens.toLocaleString()} est]`;
-          } else if (op.tool === 'User') {
-            // Show estimated tokens for user messages
-            tokensDisplay = `~${op.tokens} est`;
-          } else if (contextDelta > 0) {
-            if (this.state.sortMode === 'tokens') {
-              // In token sort mode, just show output tokens (what we're sorting by)
-              if (op.generationCost > 0) {
-                tokensDisplay = `(${op.generationCost.toLocaleString()} out)`;
-              } else {
-                tokensDisplay = `${op.tokens.toLocaleString()} tokens`;
-              }
-            } else {
-              // In time/operation sort mode, show context delta + output tokens
-              tokensDisplay = `+${contextDelta.toLocaleString()} actual`;
-              if (op.generationCost > 0) {
-                tokensDisplay += ` (${op.generationCost.toLocaleString()} out)`;
-              }
-            }
-          } else if (op.generationCost > 0) {
-            tokensDisplay = `(${op.generationCost.toLocaleString()} out)`;
-          } else {
-            tokensDisplay = `${op.tokens.toLocaleString()} tokens`;
-          }
-        } else {
-          // Multi-operation bundle (only in hierarchical view)
-          icon = '📦';
-          description = `${icon} Bundle (${bundle.operations.length} ops)`;
-          tokensDisplay = `${bundle.totalTokens.toLocaleString()} tokens`;
-        }
-        
-        // Add capacity warning if near limit
-        const capacityWarning = capacity.isNearLimit ? ' ⚠️' : '';
-        const remainingStr = `${Math.round(capacity.remaining/1000)}k left`;
-        
-        // Handle indentation for child items - indent the token display and description
-        const tokensDisplayWithIndent = item.isChild ? `  ${tokensDisplay}` : tokensDisplay;
-        const descriptionWithIndent = item.isChild ? `  ${description}` : description;
-        
-        const line = `${prefix}${timeStr} [${contextStr}] | ${tokensDisplayWithIndent.padEnd(27)} | ${descriptionWithIndent}${capacityWarning}`;
-        if (isSelected) {
-          console.log(`\x1b[44m${line.padEnd(100)}\x1b[0m`); // Blue background
-        } else {
-          console.log(line);
-        }
-      } else {
-        // Operation under expanded bundle
-        const op = item.operation!;
-        const timeStr = new Date(op.timestamp).toLocaleTimeString();
-        const tokensStr = `${op.tokens.toLocaleString()} tokens - ${op.allocation}`;
-        
-        const line = `${prefix}    └─ ${op.tool}: ${op.details} (${tokensStr})`;
-        if (isSelected) {
-          console.log(`\x1b[44m${line.padEnd(80)}\x1b[0m`); // Blue background
-        } else {
-          console.log(`\x1b[2m${line}\x1b[0m`); // Dimmed
-        }
-      }
-    });
-    
-    // Add spacing if fewer items than page size
-    for (let i = visibleItems.length; i < itemsPerPage; i++) {
-      console.log('');
+    const actions: ListActions = {
+      onSelect: (item, index) => this.handleListSelect(item, index),
+      onBack: () => { this.state.shouldExit = true; this.state.exitCode = 2; },
+      onQuit: () => { this.state.shouldExit = true; this.state.exitCode = 0; },
+      onToggleExpand: (item, index) => this.handleToggleExpand(item, index),
+      onSelectionChange: (newIndex) => { this.state.selectedIndex = newIndex; }
+    };
+
+    if (!this.listView) {
+      this.listView = new GenericListView(listView, actions);
+    } else {
+      this.listView.updateView(listView);
+      this.listView.updateActions(actions);
     }
 
-    // Controls
-    console.log('\n' + '─'.repeat(80));
-    console.log('Controls: [t]okens | [c]hronological | [o]peration | [Tab] expand | [↑↓] navigate | [Enter] details | [ESC] back | [q]uit');
-    console.log('Press sort keys again to toggle asc/desc (↑↓)');
+    this.listView.render();
+  }
+
+  private handleListSelect(item: ListItem, index: number): void {
+    // Parse the item ID to extract message ID and optional content part
+    const bracketMatch = item.id.match(/^([^[\]]+)(?:\[(\d+)\])?$/);
+    if (!bracketMatch) return;
+    
+    const messageId = bracketMatch[1];
+    const contentPart = bracketMatch[2] ? parseInt(bracketMatch[2], 10) : undefined;
+    
+    // Find the corresponding bundle(s)
+    const bundle = this.state.bundles.find(b => b.id === messageId);
+    if (!bundle) return;
+
+    // Handle selection based on bundle type
+    if (bundle.isSubAgent) {
+      this.state.viewingSubAgent = bundle;
+      this.state.selectedIndex = 0;
+    } else if (bundle.operations.length === 1 && bundle.operations[0].tool === 'ToolResponse') {
+      // Show linked operations for ToolResponse
+      const toolResponseOp = bundle.operations[0];
+      if (toolResponseOp.tool_use_id) {
+        const linkedOps = getLinkedOperations(this.state.bundles, toolResponseOp.tool_use_id);
+        const linkedBundle: Bundle = {
+          id: `linked-${toolResponseOp.tool_use_id}`,
+          timestamp: Math.min(...linkedOps.map(op => op.timestamp)),
+          operations: linkedOps,
+          totalTokens: linkedOps.reduce((sum, op) => sum + op.tokens, 0)
+        };
+        this.state.viewingDetails = linkedBundle;
+      } else {
+        this.state.viewingDetails = bundle;
+      }
+    } else if (contentPart !== undefined) {
+      // Show specific content part - find the bundle with matching message ID and content part
+      const targetBundle = this.state.bundles.find(b => 
+        b.operations.some(op => op.message_id === messageId && op.contentPartIndex === contentPart)
+      );
+      
+      if (targetBundle) {
+        // Create synthetic bundle with just the specific content part operation
+        const targetOp = targetBundle.operations.find(op => 
+          op.message_id === messageId && op.contentPartIndex === contentPart
+        );
+        if (targetOp) {
+          const syntheticBundle: Bundle = {
+            id: `${messageId}[${contentPart}]`,
+            timestamp: targetOp.timestamp,
+            operations: [targetOp],
+            totalTokens: targetOp.tokens
+          };
+          this.state.viewingDetails = syntheticBundle;
+        } else {
+          this.state.viewingDetails = targetBundle;
+        }
+      } else {
+        this.state.viewingDetails = bundle;
+      }
+    } else {
+      // Show whole message (all content parts) - need to find ALL bundles with this message ID
+      const allBundlesForMessage = this.state.bundles.filter(b => 
+        b.operations.some(op => op.message_id === messageId)
+      );
+      
+      if (allBundlesForMessage.length > 1) {
+        // Combine all operations from all bundles with this message ID
+        const allOperations: Operation[] = [];
+        allBundlesForMessage.forEach(b => {
+          allOperations.push(...b.operations.filter(op => op.message_id === messageId));
+        });
+        
+        // Sort by contentPartIndex to maintain proper order
+        allOperations.sort((a, b) => {
+          const aIndex = a.contentPartIndex ?? 0;
+          const bIndex = b.contentPartIndex ?? 0;
+          return aIndex - bIndex;
+        });
+        
+        const combinedBundle: Bundle = {
+          id: messageId,
+          timestamp: Math.min(...allOperations.map(op => op.timestamp)),
+          operations: allOperations,
+          totalTokens: allOperations.reduce((sum, op) => sum + op.tokens, 0)
+        };
+        
+        this.state.viewingDetails = combinedBundle;
+      } else {
+        this.state.viewingDetails = bundle;
+      }
+    }
+    
+    this.state.detailScrollOffset = 0;
+  }
+
+  private handleToggleExpand(item: ListItem, index: number): void {
+    if (item.canExpand) {
+      if (this.state.expanded.has(item.id)) {
+        this.state.expanded.delete(item.id);
+      } else {
+        this.state.expanded.add(item.id);
+      }
+    }
+  }
+
+  private handleSubAgentSelect(item: ListItem, index: number): void {
+    // For sub-agent view, show detail view for selected operation
+    const subAgentBundle = this.state.viewingSubAgent!;
+    const selectedOp = subAgentBundle.operations[index];
+    
+    // Create a single-operation bundle for detail view
+    const detailBundle: Bundle = {
+      id: `subagent-op-${selectedOp.timestamp}`,
+      timestamp: selectedOp.timestamp,
+      operations: [selectedOp],
+      totalTokens: selectedOp.tokens
+    };
+    
+    this.state.viewingDetails = detailBundle;
+    this.state.detailScrollOffset = 0;
+  }
+
+  private transformSubAgentOperationsToListItems(subAgentBundle: Bundle): ListItem[] {
+    let contextTotal = 0;
+    
+    return subAgentBundle.operations.map((op, index) => {
+      // Calculate context growth for this operation
+      let contextDelta = 0;
+      if (op.usage && op.allocation === 'exact') {
+        contextDelta = op.usage.cache_creation_input_tokens || 0;
+      }
+      
+      // Format context display
+      const contextStr = contextTotal > 0 
+        ? `${(contextTotal / 1000).toFixed(0).padStart(3)},${(contextTotal % 1000).toString().padStart(3, '0')}`
+        : '---,---';
+      
+      // Get icon and title (sub-agent context)
+      const icon = this.getOperationIcon(op, true);
+      const toolDisplay = this.getToolDisplay(op, true);
+      const title = `${icon} ${toolDisplay}: ${op.details}`;
+      
+      // Get token metadata for sub-agent operations
+      let metadata: string;
+      if (op.tool === 'ToolResponse') {
+        const sizeKB = (op.responseSize / 1024).toFixed(1);
+        const estimatedTokens = estimateTokensFromContent(op.responseSize);
+        metadata = `[${sizeKB}KB → ~${estimatedTokens.toLocaleString()} est]`;
+      } else if (op.tool === 'User') {
+        metadata = `~${op.tokens} est`;
+      } else if (contextDelta > 0) {
+        metadata = `+${contextDelta.toLocaleString()} actual`;
+        if (op.generationCost && op.generationCost > 0) {
+          metadata += ` (${op.generationCost.toLocaleString()} out)`;
+        }
+      } else if (op.generationCost && op.generationCost > 0) {
+        metadata = `(${op.generationCost.toLocaleString()} out)`;
+      } else {
+        metadata = `~${op.tokens} est`;
+      }
+      
+      // Update context for next operation
+      if (op.usage && op.allocation === 'exact') {
+        contextTotal += op.usage.cache_creation_input_tokens || 0;
+      }
+      
+      return {
+        id: `${subAgentBundle.id}-op-${index}`,
+        timestamp: op.timestamp,
+        icon,
+        title,
+        subtitle: contextStr,
+        metadata,
+        isChild: false,
+        canExpand: false,
+        isExpanded: false
+      };
+    });
   }
 
   private renderDetails(): void {
@@ -464,11 +679,18 @@ class TokenAnalyzer {
     
     this.clearScreen();
     
-    // Check if this is a linked tool operations bundle
+    // Check if this is a sub-agent bundle
+    const isSubAgentBundle = bundle.isSubAgent;
     const isLinkedBundle = bundle.id.startsWith('linked-');
-    const headerTitle = isLinkedBundle 
-      ? `LINKED TOOL OPERATIONS - ${bundle.operations.length} Operations`
-      : `BUNDLE DETAILS - ${bundle.operations.length} Operations`;
+    
+    let headerTitle: string;
+    if (isSubAgentBundle) {
+      headerTitle = `SUB-AGENT DETAILS - ${bundle.operations.length} Operations`;
+    } else if (isLinkedBundle) {
+      headerTitle = `LINKED TOOL OPERATIONS - ${bundle.operations.length} Operations`;
+    } else {
+      headerTitle = `BUNDLE DETAILS - ${bundle.operations.length} Operations`;
+    }
     
     console.log(`┌${'─'.repeat(78)}┐`);
     console.log(`│ ${headerTitle}`);
@@ -479,7 +701,13 @@ class TokenAnalyzer {
     console.log(`Total Tokens: ${bundle.totalTokens.toLocaleString()}`);
     console.log(`Time: ${new Date(bundle.timestamp).toLocaleTimeString()}`);
     
-    if (isLinkedBundle) {
+    if (isSubAgentBundle) {
+      console.log(`Sub-Agent Type: ${bundle.subAgentType || 'unknown'}`);
+      console.log(`Parent Task ID: ${bundle.parentTaskId || 'unknown'}`);
+      if (bundle.duration) {
+        console.log(`Duration: ${(bundle.duration / 1000).toFixed(1)}s`);
+      }
+    } else if (isLinkedBundle) {
       const toolUseId = bundle.id.replace('linked-', '');
       console.log(`Tool Use ID: ${toolUseId}`);
     }
@@ -519,6 +747,9 @@ class TokenAnalyzer {
         // Show operation metadata
         if (operation.message_id) {
           allLines.push(`│ Message ID: ${operation.message_id}`);
+        }
+        if (operation.contentPartIndex !== undefined) {
+          allLines.push(`│ Content Part: ${operation.contentPartIndex} (showing only this part)`);
         }
         if (operation.sequence !== undefined) {
           allLines.push(`│ Sequence: ${operation.sequence}`);
@@ -587,9 +818,37 @@ class TokenAnalyzer {
       }
       
       allLines.push(`│ Response:`);
-      const responseContent = typeof operation.response === 'string' 
-        ? operation.response 
-        : JSON.stringify(operation.response, null, 2);
+      
+      // Handle different response types properly
+      let responseContent: string;
+      if (typeof operation.response === 'string') {
+        responseContent = operation.response;
+      } else if (Array.isArray(operation.response)) {
+        // If contentPartIndex is specified, show only that specific part
+        if (operation.contentPartIndex !== undefined && operation.response[operation.contentPartIndex]) {
+          const part = operation.response[operation.contentPartIndex];
+          if (part.type === 'text') {
+            responseContent = part.text;
+          } else if (part.type === 'tool_use') {
+            responseContent = `${part.name}: ${JSON.stringify(part.input, null, 2)}`;
+          } else {
+            responseContent = JSON.stringify(part, null, 2);
+          }
+        } else {
+          // Show all parts (default behavior for operations without contentPartIndex)
+          responseContent = operation.response.map((part: any) => {
+            if (part.type === 'text') {
+              return part.text;
+            } else if (part.type === 'tool_use') {
+              return `${part.name}: ${JSON.stringify(part.input, null, 2)}`;
+            } else {
+              return JSON.stringify(part, null, 2);
+            }
+          }).join('\n');
+        }
+      } else {
+        responseContent = JSON.stringify(operation.response, null, 2);
+      }
       
       responseContent.split('\n').forEach(line => allLines.push(`│   ${line}`));
       
@@ -614,6 +873,8 @@ class TokenAnalyzer {
     console.log('[↑↓] scroll | [ESC] back to list');
   }
 
+
+
   private async mainLoop(): Promise<void> {
     while (!this.state.shouldExit) {
       await new Promise<void>((resolve) => {
@@ -623,7 +884,16 @@ class TokenAnalyzer {
           if (this.state.viewingDetails) {
             this.handleDetailsKeys(keyStr);
           } else {
-            this.handleMainKeys(keyStr);
+            // Both main view and sub-agent view use generic list component now
+            // Handle sort keys for main view, then delegate to generic component
+            if (!this.state.viewingSubAgent) {
+              this.handleMainKeys(keyStr);
+            } else {
+              // For sub-agent view, delegate directly to generic list component
+              if (this.listView) {
+                this.listView.handleKey(keyStr);
+              }
+            }
           }
           
           if (!this.state.shouldExit) {
@@ -646,11 +916,7 @@ class TokenAnalyzer {
   }
 
   private handleMainKeys(key: string): void {
-    // Use same view logic as render()
-    const flatItems = this.state.sortMode === 'tokens' 
-      ? this.getFlatOperations()
-      : this.getFlatItems();
-    
+    // Handle sort keys first
     switch (key) {
       case 't':
         if (this.state.sortMode === 'tokens') {
@@ -660,7 +926,7 @@ class TokenAnalyzer {
           this.state.sortAscending = false; // Default to descending for tokens (high to low)
         }
         this.state.selectedIndex = 0;
-        break;
+        return;
       case 'c':
         if (this.state.sortMode === 'time') {
           this.state.sortAscending = !this.state.sortAscending;
@@ -669,7 +935,7 @@ class TokenAnalyzer {
           this.state.sortAscending = true; // Default to ascending for time (chronological)
         }
         this.state.selectedIndex = 0;
-        break;
+        return;
       case 'o':
         if (this.state.sortMode === 'operation') {
           this.state.sortAscending = !this.state.sortAscending;
@@ -678,69 +944,28 @@ class TokenAnalyzer {
           this.state.sortAscending = true; // Default to ascending for operation (A-Z)
         }
         this.state.selectedIndex = 0;
-        break;
-      case '\u001b': // ESC
-        this.state.shouldExit = true;
-        this.state.exitCode = 2; // Special exit code for "back to session tree"
-        break;
-      case 'q':
-      case '\u0003': // Ctrl+C
-        this.state.shouldExit = true;
-        this.state.exitCode = 0;
-        break;
-      case '\t': // Tab
-        if (flatItems.length > 0) {
-          const item = flatItems[this.state.selectedIndex];
-          if (item.type === 'bundle' && item.bundle.operations.length > 1) {
-            if (this.state.expanded.has(item.bundle.id)) {
-              this.state.expanded.delete(item.bundle.id);
-            } else {
-              this.state.expanded.add(item.bundle.id);
-            }
-          }
-        }
-        break;
-      case '\r': // Enter
-        if (flatItems.length > 0) {
-          const item = flatItems[this.state.selectedIndex];
-          
-          // If this is a ToolResponse, show all linked operations
-          if (item.bundle.operations.length === 1 && item.bundle.operations[0].tool === 'ToolResponse') {
-            const toolResponseOp = item.bundle.operations[0];
-            if (toolResponseOp.tool_use_id) {
-              // Create a virtual bundle with all linked operations
-              const linkedOps = getLinkedOperations(this.state.bundles, toolResponseOp.tool_use_id);
-              const linkedBundle: Bundle = {
-                id: `linked-${toolResponseOp.tool_use_id}`,
-                timestamp: Math.min(...linkedOps.map(op => op.timestamp)),
-                operations: linkedOps,
-                totalTokens: linkedOps.reduce((sum, op) => sum + op.tokens, 0)
-              };
-              this.state.viewingDetails = linkedBundle;
-            } else {
-              this.state.viewingDetails = item.bundle;
-            }
-          } else {
-            this.state.viewingDetails = item.bundle;
-          }
-          
-          this.state.detailScrollOffset = 0;
-        }
-        break;
-      case '\u001b[A': // Up arrow
-        this.state.selectedIndex = Math.max(0, this.state.selectedIndex - 1);
-        break;
-      case '\u001b[B': // Down arrow
-        this.state.selectedIndex = Math.min(flatItems.length - 1, this.state.selectedIndex + 1);
-        break;
+        return;
+    }
+
+    // Let generic list view handle other keys
+    if (this.listView) {
+      this.listView.handleKey(key);
     }
   }
 
   private handleDetailsKeys(key: string): void {
     switch (key) {
       case '\u001b': // ESC
-        this.state.viewingDetails = null;
-        this.state.detailScrollOffset = 0;
+        // Check if we came from a sub-agent view
+        if (this.state.viewingDetails?.id.startsWith('subagent-op-') && this.state.viewingSubAgent) {
+          // Go back to sub-agent list view, not main view
+          this.state.viewingDetails = null;
+          this.state.detailScrollOffset = 0;
+        } else {
+          // Normal detail view, go back to main view
+          this.state.viewingDetails = null;
+          this.state.detailScrollOffset = 0;
+        }
         break;
       case '\u001b[A': // Up arrow
         this.state.detailScrollOffset = Math.max(0, this.state.detailScrollOffset - 1);
@@ -756,12 +981,99 @@ class TokenAnalyzer {
     }
   }
 
+
   private async waitForKey(): Promise<void> {
     return new Promise(resolve => {
       process.stdin.once('data', () => resolve());
     });
   }
 
+
+  private goToDirectDetailView(): void {
+    // Find the bundle that matches the direct message ID
+    const targetBundle = this.state.bundles.find(bundle => 
+      bundle.operations.some(op => op.message_id === this.directMessageId)
+    );
+    
+    if (!targetBundle) {
+      console.error(`❌ Message ID ${this.directMessageId} not found in session`);
+      this.state.shouldExit = true;
+      this.state.exitCode = 1;
+      return;
+    }
+    
+    // If contentPart is specified, find the specific bundle with that content part
+    if (this.directContentPart !== undefined) {
+      // Find the bundle that contains the specific content part
+      const targetBundleWithPart = this.state.bundles.find(b => 
+        b.operations.some(op => 
+          op.message_id === this.directMessageId && op.contentPartIndex === this.directContentPart
+        )
+      );
+      
+      if (!targetBundleWithPart) {
+        console.error(`❌ Content part ${this.directContentPart} not found for message ID ${this.directMessageId}`);
+        this.state.shouldExit = true;
+        this.state.exitCode = 1;
+        return;
+      }
+      
+      // Find the specific operation within that bundle
+      const targetOp = targetBundleWithPart.operations.find(op => 
+        op.message_id === this.directMessageId && op.contentPartIndex === this.directContentPart
+      );
+      
+      if (!targetOp) {
+        console.error(`❌ Operation not found for content part ${this.directContentPart}`);
+        this.state.shouldExit = true;
+        this.state.exitCode = 1;
+        return;
+      }
+      
+      // Create synthetic bundle with just this operation
+      const syntheticBundle: Bundle = {
+        id: `${this.directMessageId}[${this.directContentPart}]`,
+        timestamp: targetOp.timestamp,
+        operations: [targetOp],
+        totalTokens: targetOp.tokens
+      };
+      
+      this.state.viewingDetails = syntheticBundle;
+    } else {
+      // No content part specified - show whole message (all parts from all bundles)
+      const allBundlesForMessage = this.state.bundles.filter(b => 
+        b.operations.some(op => op.message_id === this.directMessageId)
+      );
+      
+      if (allBundlesForMessage.length > 1) {
+        // Combine all operations from all bundles with this message ID
+        const allOperations: Operation[] = [];
+        allBundlesForMessage.forEach(b => {
+          allOperations.push(...b.operations.filter(op => op.message_id === this.directMessageId));
+        });
+        
+        // Sort by contentPartIndex to maintain proper order
+        allOperations.sort((a, b) => {
+          const aIndex = a.contentPartIndex ?? 0;
+          const bIndex = b.contentPartIndex ?? 0;
+          return aIndex - bIndex;
+        });
+        
+        const combinedBundle: Bundle = {
+          id: this.directMessageId!,
+          timestamp: Math.min(...allOperations.map(op => op.timestamp)),
+          operations: allOperations,
+          totalTokens: allOperations.reduce((sum, op) => sum + op.tokens, 0)
+        };
+        
+        this.state.viewingDetails = combinedBundle;
+      } else {
+        this.state.viewingDetails = targetBundle;
+      }
+    }
+    
+    this.state.detailScrollOffset = 0;
+  }
 
   private cleanup(): void {
     if (process.stdin.isTTY) {
@@ -776,8 +1088,8 @@ class TokenAnalyzer {
   }
 }
 
-export async function launchTUI(sessionId: string, jsonlPath?: string): Promise<number> {
-  const analyzer = new TokenAnalyzer(sessionId, jsonlPath);
+export async function launchTUI(sessionId: string, jsonlPath?: string, messageId?: string, contentPart?: number): Promise<number> {
+  const analyzer = new TokenAnalyzer(sessionId, jsonlPath, messageId, contentPart);
   await analyzer.initialize();
   return analyzer.getExitCode();
 }
