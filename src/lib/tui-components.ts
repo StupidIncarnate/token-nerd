@@ -80,17 +80,26 @@ class TokenAnalyzer {
       
       switch (this.state.sortMode) {
         case 'tokens':
-          // For token sorting, prioritize context growth operations
+          // Sort by per-operation token impact, not cumulative context
           const aOp = a.operations[0];
           const bOp = b.operations[0];
           
-          // Sort ToolResponses by size, others by tokens
-          const aValue = aOp?.tool === 'ToolResponse' ? aOp.responseSize :
-                        aOp?.contextGrowth > 0 ? aOp.contextGrowth : 
-                        a.totalTokens;
-          const bValue = bOp?.tool === 'ToolResponse' ? bOp.responseSize :
-                        bOp?.contextGrowth > 0 ? bOp.contextGrowth :
-                        b.totalTokens;
+          // Get per-operation token cost that matches what user sees
+          const getOperationTokens = (op: any) => {
+            if (op?.tool === 'ToolResponse') {
+              // Use estimated tokens for ToolResponse (~2,099 est)
+              return Math.ceil(op.responseSize / 3.7);
+            } else if (op?.tool === 'Assistant' && op?.generationCost > 0) {
+              // For Assistant messages, use output tokens (78 out)
+              return op.generationCost;
+            } else {
+              // For User messages and others, use the operation tokens
+              return op?.tokens || 0;
+            }
+          };
+          
+          const aValue = getOperationTokens(aOp);
+          const bValue = getOperationTokens(bOp);
           
           result = aValue - bValue;
           break;
@@ -108,6 +117,58 @@ class TokenAnalyzer {
       
       return this.state.sortAscending ? result : -result;
     });
+  }
+
+  private getFlatOperations(): Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number; isChild?: boolean }> {
+    // For token sorting: flat list of all operations, no hierarchical relationships
+    const items: Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number; isChild?: boolean }> = [];
+    
+    // Extract all individual operations from bundles
+    const allOperations: Array<{ operation: Operation; bundle: Bundle }> = [];
+    
+    this.state.bundles.forEach(bundle => {
+      bundle.operations.forEach(operation => {
+        allOperations.push({ operation, bundle });
+      });
+    });
+    
+    // Sort by individual operation token value
+    const getOperationTokens = (op: Operation) => {
+      if (op.tool === 'ToolResponse') {
+        return Math.ceil(op.responseSize / 3.7);
+      } else if (op.tool === 'Assistant' && op.generationCost > 0) {
+        return op.generationCost;
+      } else {
+        return op.tokens || 0;
+      }
+    };
+    
+    allOperations.sort((a, b) => {
+      const aValue = getOperationTokens(a.operation);
+      const bValue = getOperationTokens(b.operation);
+      return this.state.sortAscending ? aValue - bValue : bValue - aValue;
+    });
+    
+    // Convert back to display format - create synthetic single-operation bundles
+    allOperations.forEach((item, index) => {
+      // Create a synthetic bundle containing only this operation
+      const syntheticBundle: Bundle = {
+        id: item.bundle.id,
+        timestamp: item.operation.timestamp,
+        operations: [item.operation],
+        totalTokens: item.operation.tokens
+      };
+      
+      items.push({
+        type: 'bundle',
+        bundle: syntheticBundle,
+        operation: item.operation,
+        index: index,
+        isChild: false
+      });
+    });
+    
+    return items;
   }
 
   private getFlatItems(): Array<{ type: 'bundle' | 'operation'; bundle: Bundle; operation?: Operation; index: number; isChild?: boolean }> {
@@ -199,7 +260,11 @@ class TokenAnalyzer {
 
     // Get session total from JSONL (not sum of individual operations)
     const totalTokens = this.jsonlPath ? await getCurrentTokenCount(this.jsonlPath) : 0;
-    const flatItems = this.getFlatItems();
+    
+    // Choose view type based on sort mode
+    const flatItems = this.state.sortMode === 'tokens' 
+      ? this.getFlatOperations()  // Flat view for token sorting
+      : this.getFlatItems();      // Hierarchical view for time/operation sorting
     
     // Pagination for long lists
     const itemsPerPage = 20;
@@ -256,11 +321,13 @@ class TokenAnalyzer {
       
       if (item.type === 'bundle') {
         const bundle = item.bundle;
-        const expandIcon = bundle.operations.length > 1 
+        // In flat token view, we display individual operations, not bundles
+        const op = item.operation || bundle.operations[0];
+        const expandIcon = (!item.operation && bundle.operations.length > 1) 
           ? (this.state.expanded.has(bundle.id) ? '▼' : '▶') 
           : ' ';
         
-        const timeStr = new Date(bundle.timestamp).toLocaleTimeString();
+        const timeStr = new Date(item.operation?.timestamp || bundle.timestamp).toLocaleTimeString();
         const contextTotal = contextTotals.get(bundle.id) || 0;
         
         // Compare with previous line's context total to decide whether to show actual number or [---,---]
@@ -292,8 +359,8 @@ class TokenAnalyzer {
         let tokensDisplay: string;
         let icon: string;
         
-        if (bundle.operations.length === 1) {
-          const op = bundle.operations[0];
+        if (item.operation || bundle.operations.length === 1) {
+          // Use the specific operation (flat view) or the single bundle operation (hierarchical view)
           
           // Choose icon based on tool type
           switch(op.tool) {
@@ -326,20 +393,27 @@ class TokenAnalyzer {
             // Show estimated tokens for user messages
             tokensDisplay = `~${op.tokens} est`;
           } else if (contextDelta > 0) {
-            // Show actual context window delta (what this message added)
-            tokensDisplay = `+${contextDelta.toLocaleString()} actual`;
-            if (op.generationCost > 0) {
-              tokensDisplay += ` (${op.generationCost.toLocaleString()} out)`;
+            if (this.state.sortMode === 'tokens') {
+              // In token sort mode, just show output tokens (what we're sorting by)
+              if (op.generationCost > 0) {
+                tokensDisplay = `(${op.generationCost.toLocaleString()} out)`;
+              } else {
+                tokensDisplay = `${op.tokens.toLocaleString()} tokens`;
+              }
+            } else {
+              // In time/operation sort mode, show context delta + output tokens
+              tokensDisplay = `+${contextDelta.toLocaleString()} actual`;
+              if (op.generationCost > 0) {
+                tokensDisplay += ` (${op.generationCost.toLocaleString()} out)`;
+              }
             }
-            
-            // TODO: Add correlation with preceding ToolResponse estimates
-            // This would show: "+4,343 actual (~4,200 est)" to show estimate vs reality
           } else if (op.generationCost > 0) {
-            tokensDisplay = `${op.generationCost.toLocaleString()} tokens`;
+            tokensDisplay = `(${op.generationCost.toLocaleString()} out)`;
           } else {
             tokensDisplay = `${op.tokens.toLocaleString()} tokens`;
           }
         } else {
+          // Multi-operation bundle (only in hierarchical view)
           icon = '📦';
           description = `${icon} Bundle (${bundle.operations.length} ops)`;
           tokensDisplay = `${bundle.totalTokens.toLocaleString()} tokens`;
@@ -572,7 +646,10 @@ class TokenAnalyzer {
   }
 
   private handleMainKeys(key: string): void {
-    const flatItems = this.getFlatItems();
+    // Use same view logic as render()
+    const flatItems = this.state.sortMode === 'tokens' 
+      ? this.getFlatOperations()
+      : this.getFlatItems();
     
     switch (key) {
       case 't':
