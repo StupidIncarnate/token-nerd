@@ -15,18 +15,59 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 
 ## Technical Approach
 
+## Coding Standards
+
+### Function Design Principles
+- **Single Responsibility**: Each function must do exactly one thing well
+- **Maximum 50 lines per function**: Break larger functions into focused helpers
+- **Descriptive names**: Function names should clearly state their purpose
+- **Pure functions when possible**: Avoid side effects, return values explicitly
+- **Object parameters**: Use object destructuring for functions with 3+ parameters or when it improves clarity
+
+### File Organization Rules
+- **One primary concern per file**: Don't mix unrelated functionality
+- **Maximum 200 lines per file**: Consider separation when files grow larger
+- **Logical groupings**: Group related functions into focused modules
+- **Clear dependencies**: Import only what you need, avoid circular dependencies
+
+### Type Safety Requirements
+- **No `any` types**: Use proper TypeScript interfaces and union types
+- **Strict TypeScript mode**: Enable all strict compiler checks
+- **Type guards for external data**: Validate runtime data with proper checks
+- **Explicit return types**: Always declare what functions return
+
+### Security & Safety
+- **No shell injection**: Use Node.js APIs instead of shell commands when possible
+- **Input validation**: Sanitize all user input before processing
+- **Error handling**: Every operation that can fail must handle errors explicitly
+- **No hardcoded secrets**: Use environment variables for sensitive data
+
+### Code Quality Standards
+- **No magic numbers**: Extract constants to named variables with clear meaning
+- **Consistent error handling**: Use standardized error patterns across the codebase
+- **Performance awareness**: Read files efficiently, avoid O(n²) algorithms
+- **Test coverage**: Every public function must have corresponding tests
+
+### Naming Conventions
+- **Constants**: `UPPER_SNAKE_CASE` for configuration values
+- **Functions**: `camelCase` with verb-noun pattern (`parseMessage`, `calculateTokens`)
+- **Interfaces**: `PascalCase` with descriptive names (`MessageInfo`, `TokenUsage`)
+- **Files**: `kebab-case.ts` matching their primary export
+
+### Anti-Patterns to Avoid
+- **God functions**: Functions doing multiple unrelated tasks
+- **String manipulation**: Avoid complex regex for parsing structured data
+- **Silent failures**: Always log or handle errors explicitly
+- **Tight coupling**: Functions should not depend on global state
+- **Mixed concerns**: Don't mix business logic with I/O operations
+- **Long parameter lists**: Functions with 3+ parameters must use object destructuring with typed interfaces
+
 ### Data Sources
 - **JSONL transcripts** in `~/.claude/projects/` contain token usage
 
-## Implementation Steps
-
-See [IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for detailed build plan with acceptance criteria.
-
 ## Key Discoveries
 
-- Actual token limit is ~156k, not 200k as displayed
-- `cache_creation_input_tokens` shows new cache added per message
-- `cache_read_input_tokens` shows cache reused from previous messages
+`docs/JSONL-TOKEN-FIELDS-EXPLAINED.md` explains how the jsonl fields work from a calculation perspective
 - Token growth is linear (accumulation), not exponential
 
 ## Development Commands
