@@ -356,49 +356,53 @@ export async function correlateOperations(sessionId: string, jsonlPath?: string)
         // Fallback to timestamp-based grouping if parsing fails
       }
       
-      // Filter sidechain operations by looking at parentUuid chain
-      // Find the initial sidechain message that matches this task's prompt
-      const taskDescription = taskUse.input?.description || '';
+      // Find sidechain operations by content matching with Task prompt
       const taskPrompt = taskUse.input?.prompt || '';
       
-      const taskSidechainBundles = sidechainBundles.filter(b => {
+      // Find the first sidechain operation that matches the Task prompt
+      const firstSidechainOp = sidechainBundles.find(b => {
         const op = b.operations[0];
-        
-        // Check if this sidechain operation is related to this specific task
-        // Look for operations that contain similar content to the task description/prompt
-        if (taskDescription.includes('src/installers') && op.details && op.details.includes('installers')) {
-          return true;
+        if (op.tool === 'User' && typeof op.response === 'string') {
+          return op.response === taskPrompt;
         }
-        if (taskDescription.includes('src/lib') && op.details && op.details.includes('lib')) {
-          return true;
-        }
-        
-        // Fallback: use the LS tool path parameter if available
-        if (op.tool === 'Assistant' && op.response && Array.isArray(op.response)) {
-          const lsToolUse = op.response.find(c => c.type === 'tool_use' && c.name === 'LS');
-          if (lsToolUse && lsToolUse.input?.path) {
-            const path = lsToolUse.input.path;
-            if (taskDescription.includes('src/installers') && path.includes('installers')) {
-              return true;
-            }
-            if (taskDescription.includes('src/lib') && path.includes('lib')) {
-              return true;
-            }
-          }
-        }
-        
-        // Also check ToolResponse operations for path information
-        if (op.tool === 'ToolResponse' && op.response && typeof op.response === 'string') {
-          if (taskDescription.includes('src/installers') && op.response.includes('installers')) {
-            return true;
-          }
-          if (taskDescription.includes('src/lib') && op.response.includes('lib')) {
-            return true;
-          }
-        }
-        
         return false;
       });
+      
+      if (!firstSidechainOp) {
+        continue; // No matching sidechain found for this Task
+      }
+      
+      // Collect all sidechain operations by following the parentUuid chain
+      const subAgentUuids = new Set<string>();
+      const taskSidechainBundles: Bundle[] = [];
+      
+      // Start with the first sidechain operation UUID
+      const startUuid = firstSidechainOp.operations[0].message_id;
+      const toProcess = [startUuid];
+      
+      while (toProcess.length > 0) {
+        const currentUuid = toProcess.pop()!;
+        if (subAgentUuids.has(currentUuid)) continue;
+        subAgentUuids.add(currentUuid);
+        
+        // Find the bundle with this UUID
+        const bundle = sidechainBundles.find(b => b.operations[0].message_id === currentUuid);
+        if (bundle) {
+          taskSidechainBundles.push(bundle);
+        }
+        
+        // Find child messages that have this UUID as parentUuid
+        const childMessages = allMessages.filter(msg => 
+          msg.content?.parentUuid === currentUuid && msg.isSidechain
+        );
+        
+        for (const childMsg of childMessages) {
+          const childUuid = childMsg.content?.uuid || childMsg.id;  // Use content.uuid or fallback to id
+          if (childUuid && !subAgentUuids.has(childUuid)) {
+            toProcess.push(childUuid);
+          }
+        }
+      }
       
       if (taskSidechainBundles.length > 0) {
         // Mark all operations in these bundles as belonging to this sub-agent
@@ -512,4 +516,35 @@ export function getLinkedOperations(bundles: Bundle[], targetToolUseId: string):
   }
   
   return linked.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+// Helper function to check if an operation is linked to a task through parentUuid chain
+function isLinkedToTask(op: Operation, taskId: string, allMessages: JsonlMessage[]): boolean {
+  // Find the message that contains this operation
+  let currentMsg = allMessages.find(msg => 
+    msg.id === op.message_id || 
+    msg.content?.uuid === op.message_id ||
+    msg.content?.message?.id === op.message_id
+  );
+  
+  while (currentMsg?.content?.parentUuid) {
+    // Find parent message by UUID
+    const parentMsg = allMessages.find(msg => msg.content?.uuid === currentMsg?.content?.parentUuid);
+    if (!parentMsg) break;
+    
+    // Check if parent message contains our task ID
+    const parentContent = parentMsg.content?.message?.content;
+    if (parentContent && Array.isArray(parentContent)) {
+      const hasTaskId = parentContent.some((c: any) => 
+        c.type === 'tool_use' && c.id === taskId
+      );
+      if (hasTaskId) {
+        return true;
+      }
+    }
+    
+    currentMsg = parentMsg;
+  }
+  
+  return false;
 }

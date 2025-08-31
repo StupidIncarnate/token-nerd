@@ -39,6 +39,407 @@ describe('correlation-engine', () => {
 
   describe('correlateOperations', () => {
 
+    it('should correlate sub-agent operations with Task operations via content matching', async () => {
+      const sessionId = 'test-session';
+      const jsonlPath = '/test/session.jsonl';
+      
+      const taskPrompt = "Analyze the test folder structure";
+      
+      // Mock JSONL with Task operation and sidechain operations
+      mockedParseJsonl.mockReturnValue([
+        // Task call
+        {
+          id: 'task-call-id',
+          timestamp: new Date('2025-01-01T10:00:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 100, output_tokens: 20 },
+          content: {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{
+                type: 'tool_use',
+                id: 'task-tool-id',
+                name: 'Task',
+                input: {
+                  subagent_type: 'general-purpose',
+                  description: 'Analyze test folder',
+                  prompt: taskPrompt
+                }
+              }]
+            },
+            uuid: 'task-uuid',
+            parentUuid: 'parent-uuid'
+          },
+          isSidechain: false
+        },
+        // First sidechain operation (matches Task prompt)
+        {
+          id: 'sidechain-1',
+          timestamp: new Date('2025-01-01T10:01:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: {
+              role: 'user',
+              content: taskPrompt
+            },
+            uuid: 'sidechain-1-uuid',
+            parentUuid: null
+          },
+          isSidechain: true
+        },
+        // Second sidechain operation (child of first)
+        {
+          id: 'sidechain-2',
+          timestamp: new Date('2025-01-01T10:02:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 50, output_tokens: 10 },
+          content: {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Starting analysis...' }]
+            },
+            uuid: 'sidechain-2-uuid',
+            parentUuid: 'sidechain-1-uuid'
+          },
+          isSidechain: true
+        },
+        // Task response
+        {
+          id: 'task-response-id',
+          timestamp: new Date('2025-01-01T10:05:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: {
+              role: 'user',
+              content: [{
+                tool_use_id: 'task-tool-id',
+                type: 'tool_result',
+                content: [{ type: 'text', text: 'Analysis complete' }]
+              }]
+            },
+            uuid: 'task-response-uuid',
+            parentUuid: 'task-uuid'
+          }
+        }
+      ]);
+      
+      const result = await correlateOperations(sessionId, jsonlPath);
+      
+      // Should have main bundles + sub-agent bundle
+      expect(result.length).toBeGreaterThan(2);
+      
+      // Find the sub-agent bundle
+      const subAgentBundle = result.find(b => b.isSubAgent);
+      expect(subAgentBundle).toBeDefined();
+      expect(subAgentBundle?.subAgentType).toBe('general-purpose');
+      expect(subAgentBundle?.parentTaskId).toBe('task-tool-id');
+      
+      expect(subAgentBundle?.operations.length).toBeGreaterThanOrEqual(1); // At least the first sidechain operation
+      
+      // Check that first sidechain operation is properly linked  
+      const firstOp = subAgentBundle?.operations[0];
+      expect(firstOp?.tool).toBe('User');
+      expect(firstOp?.response).toBe(taskPrompt);
+      expect(firstOp?.parentTaskId).toBe('task-tool-id');
+      expect(firstOp?.subAgentType).toBe('general-purpose');
+    });
+
+    it('should handle Task operations with no matching sidechain operations', async () => {
+      const sessionId = 'test-session';
+      const jsonlPath = '/test/session.jsonl';
+      
+      // Mock JSONL with Task that has no corresponding sidechain operations
+      mockedParseJsonl.mockReturnValue([
+        // Task call
+        {
+          id: 'task-call-id',
+          timestamp: new Date('2025-01-01T10:00:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 100, output_tokens: 20 },
+          content: {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{
+                type: 'tool_use',
+                id: 'task-tool-id',
+                name: 'Task',
+                input: {
+                  subagent_type: 'general-purpose',
+                  description: 'Test task',
+                  prompt: 'This prompt has no matching sidechain'
+                }
+              }]
+            },
+            uuid: 'task-uuid'
+          },
+          isSidechain: false
+        },
+        // Task response
+        {
+          id: 'task-response-id',
+          timestamp: new Date('2025-01-01T10:05:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: {
+              role: 'user',
+              content: [{
+                tool_use_id: 'task-tool-id',
+                type: 'tool_result',
+                content: [{ type: 'text', text: 'No sub-agent was launched' }]
+              }]
+            },
+            uuid: 'task-response-uuid',
+            parentUuid: 'task-uuid'
+          }
+        }
+      ]);
+      
+      const result = await correlateOperations(sessionId, jsonlPath);
+      
+      // Should have main bundles but no sub-agent bundle
+      const subAgentBundle = result.find(b => b.isSubAgent);
+      expect(subAgentBundle).toBeUndefined();
+      
+      // Should still have the Task operation itself
+      const taskBundle = result.find(b => 
+        b.operations[0]?.tool === 'Assistant' && 
+        b.operations[0]?.response?.some?.((c: any) => c.name === 'Task')
+      );
+      expect(taskBundle).toBeDefined();
+    });
+
+    it('should traverse complete UUID chain for sub-agent operations', async () => {
+      const sessionId = 'test-session';
+      const jsonlPath = '/test/session.jsonl';
+      
+      const taskPrompt = "Complex multi-step analysis";
+      
+      // Mock JSONL with a chain of 5 sidechain operations
+      mockedParseJsonl.mockReturnValue([
+        // Task call
+        {
+          id: 'task-call-id',
+          timestamp: new Date('2025-01-01T10:00:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 100, output_tokens: 20 },
+          content: {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{
+                type: 'tool_use',
+                id: 'task-tool-id',
+                name: 'Task',
+                input: {
+                  subagent_type: 'general-purpose',
+                  description: 'Complex analysis',
+                  prompt: taskPrompt
+                }
+              }]
+            },
+            uuid: 'task-uuid'
+          },
+          isSidechain: false
+        },
+        // First sidechain (matches Task prompt, parentUuid: null)
+        {
+          id: 'sidechain-1-uuid',
+          timestamp: new Date('2025-01-01T10:01:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: { role: 'user', content: taskPrompt },
+            uuid: 'sidechain-1-uuid',
+            parentUuid: null
+          },
+          isSidechain: true
+        },
+        // Second sidechain (has usage data)
+        {
+          id: 'sidechain-2-uuid',
+          timestamp: new Date('2025-01-01T10:02:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 50, output_tokens: 10 },
+          content: {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'Step 1' }] },
+            uuid: 'sidechain-2-uuid',
+            parentUuid: 'sidechain-1-uuid'
+          },
+          isSidechain: true
+        },
+        // Third sidechain (no usage data - should not create bundle)
+        {
+          id: 'sidechain-3-uuid',
+          timestamp: new Date('2025-01-01T10:03:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: { role: 'user', content: 'Continue analysis' },
+            uuid: 'sidechain-3-uuid',
+            parentUuid: 'sidechain-2-uuid'
+          },
+          isSidechain: true
+        },
+        // Fourth sidechain (has usage data)
+        {
+          id: 'sidechain-4-uuid',
+          timestamp: new Date('2025-01-01T10:04:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 30, output_tokens: 5 },
+          content: {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'Step 2' }] },
+            uuid: 'sidechain-4-uuid',
+            parentUuid: 'sidechain-3-uuid'
+          },
+          isSidechain: true
+        },
+        // Fifth sidechain (has usage data)
+        {
+          id: 'sidechain-5-uuid',
+          timestamp: new Date('2025-01-01T10:05:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 20, output_tokens: 8 },
+          content: {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'Final step' }] },
+            uuid: 'sidechain-5-uuid',
+            parentUuid: 'sidechain-4-uuid'
+          },
+          isSidechain: true
+        },
+        // Task response
+        {
+          id: 'task-response-id',
+          timestamp: new Date('2025-01-01T10:10:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: {
+              role: 'user',
+              content: [{
+                tool_use_id: 'task-tool-id',
+                type: 'tool_result',
+                content: [{ type: 'text', text: 'Analysis complete' }]
+              }]
+            },
+            uuid: 'task-response-uuid',
+            parentUuid: 'task-uuid'
+          }
+        }
+      ]);
+      
+      const result = await correlateOperations(sessionId, jsonlPath);
+      
+      // Find the sub-agent bundle
+      const subAgentBundle = result.find(b => b.isSubAgent);
+      expect(subAgentBundle).toBeDefined();
+      expect(subAgentBundle?.parentTaskId).toBe('task-tool-id');
+      
+      // Should have 5 operations: all sidechain operations get bundled
+      // User messages create bundles even without usage data
+      expect(subAgentBundle?.operations.length).toBe(5);
+      
+      // Verify the operations are in chronological order
+      const ops = subAgentBundle?.operations || [];
+      expect(ops[0].tool).toBe('User');
+      expect(ops[0].message_id).toBe('sidechain-1-uuid');
+      expect(ops[1].tool).toBe('Assistant');
+      expect(ops[1].message_id).toBe('sidechain-2-uuid');
+      expect(ops[2].tool).toBe('User'); // sidechain-3
+      expect(ops[2].message_id).toBe('sidechain-3-uuid');
+      expect(ops[3].tool).toBe('Assistant');
+      expect(ops[3].message_id).toBe('sidechain-4-uuid');
+      expect(ops[4].tool).toBe('Assistant');
+      expect(ops[4].message_id).toBe('sidechain-5-uuid');
+      
+      // Verify all operations have correct metadata
+      ops.forEach(op => {
+        expect(op.parentTaskId).toBe('task-tool-id');
+        expect(op.subAgentType).toBe('general-purpose');
+      });
+    });
+
+    it('should handle broken UUID chains gracefully', async () => {
+      const sessionId = 'test-session';
+      const jsonlPath = '/test/session.jsonl';
+      
+      const taskPrompt = "Test broken chain";
+      
+      // Mock JSONL with broken parentUuid chain
+      mockedParseJsonl.mockReturnValue([
+        // Task call
+        {
+          id: 'task-call-id',
+          timestamp: new Date('2025-01-01T10:00:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 100, output_tokens: 20 },
+          content: {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{
+                type: 'tool_use',
+                id: 'task-tool-id',
+                name: 'Task',
+                input: { prompt: taskPrompt }
+              }]
+            },
+            uuid: 'task-uuid'
+          },
+          isSidechain: false
+        },
+        // First sidechain (matches Task prompt)
+        {
+          id: 'sidechain-1-uuid',
+          timestamp: new Date('2025-01-01T10:01:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: { role: 'user', content: taskPrompt },
+            uuid: 'sidechain-1-uuid',
+            parentUuid: null
+          },
+          isSidechain: true
+        },
+        // Orphaned sidechain (parent UUID doesn't exist)
+        {
+          id: 'sidechain-orphan-uuid',
+          timestamp: new Date('2025-01-01T10:02:00Z').getTime(),
+          usage: { cache_creation_input_tokens: 50, output_tokens: 10 },
+          content: {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'Orphaned' }] },
+            uuid: 'sidechain-orphan-uuid',
+            parentUuid: 'non-existent-uuid'
+          },
+          isSidechain: true
+        },
+        // Task response
+        {
+          id: 'task-response-id',
+          timestamp: new Date('2025-01-01T10:05:00Z').getTime(),
+          content: {
+            type: 'user',
+            message: {
+              role: 'user',
+              content: [{
+                tool_use_id: 'task-tool-id',
+                type: 'tool_result',
+                content: [{ type: 'text', text: 'Done' }]
+              }]
+            },
+            uuid: 'task-response-uuid',
+            parentUuid: 'task-uuid'
+          }
+        }
+      ]);
+      
+      const result = await correlateOperations(sessionId, jsonlPath);
+      
+      // Should still create sub-agent bundle with just the first operation
+      const subAgentBundle = result.find(b => b.isSubAgent);
+      expect(subAgentBundle).toBeDefined();
+      expect(subAgentBundle?.operations.length).toBe(1);
+      expect(subAgentBundle?.operations[0].message_id).toBe('sidechain-1-uuid');
+      
+      // Orphaned operation should not be included
+      const orphanOp = subAgentBundle?.operations.find(op => op.message_id === 'sidechain-orphan-uuid');
+      expect(orphanOp).toBeUndefined();
+    });
+
     it('should process different message types from JSONL', async () => {
       const sessionId = 'test-session';
       const jsonlPath = '/test/session.jsonl';
