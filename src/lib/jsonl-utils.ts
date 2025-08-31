@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as readline from 'readline';
 
 export interface JsonlMessage {
   id: string;
@@ -19,45 +20,133 @@ export interface JsonlMessage {
   isSidechain?: boolean; // True if this message is part of a sub-agent execution
 }
 
-export function parseJsonl(filePath: string): JsonlMessage[] {
-  try {
-    const expandedPath = filePath.replace('~', os.homedir());
-    if (!fs.existsSync(expandedPath)) {
+export interface TranscriptMessage {
+  type?: string;
+  usage?: JsonlMessage['usage'];
+  message?: {
+    usage?: JsonlMessage['usage'];
+    id?: string;
+  };
+  id?: string;
+  uuid?: string;
+  timestamp?: string;
+  isSidechain?: boolean;
+}
+
+export class JsonlReader {
+  /**
+   * Reads all messages from JSONL file synchronously (for smaller files)
+   */
+  static parseJsonl(filePath: string): JsonlMessage[] {
+    try {
+      const expandedPath = filePath.replace('~', os.homedir());
+      if (!fs.existsSync(expandedPath)) {
+        return [];
+      }
+      
+      const content = fs.readFileSync(expandedPath, 'utf8');
+      const lines = content.trim().split('\n').filter(line => line.trim());
+      
+      return lines
+        .map(line => this.parseJsonlLine(line))
+        .filter((msg): msg is JsonlMessage => msg !== null);
+    } catch (error) {
       return [];
     }
-    
-    const content = fs.readFileSync(expandedPath, 'utf8');
-    const lines = content.trim().split('\n').filter(line => line.trim());
-    
-    return lines
-      .map(line => {
-        try {
-          const parsed = JSON.parse(line);
-          // Extract usage data - could be at root level or inside message object
-          const usage = parsed.usage || parsed.message?.usage;
-          const messageId = parsed.message?.id || parsed.id || parsed.uuid;
-          
-          const result: JsonlMessage = {
-            id: messageId,
-            timestamp: new Date(parsed.timestamp || 0).getTime(),
-            usage: usage,
-            content: parsed
-          };
-          
-          // Only add isSidechain if it exists in parsed data
-          if (parsed.isSidechain !== undefined) {
-            result.isSidechain = parsed.isSidechain;
-          }
-          
-          return result;
-        } catch (error) {
-          return null;
-        }
-      })
-      .filter((msg): msg is JsonlMessage => msg !== null);
-  } catch (error) {
-    return [];
   }
+
+  /**
+   * Streams through JSONL file and processes each message (for larger files)
+   */
+  static async streamMessages<T>(
+    filePath: string, 
+    processor: (msg: TranscriptMessage, lineNumber: number) => T | null
+  ): Promise<T[]> {
+    if (!fs.existsSync(filePath)) {
+      return [];
+    }
+
+    const results: T[] = [];
+    let lineNumber = 0;
+
+    try {
+      const fileStream = fs.createReadStream(filePath);
+      const rl = readline.createInterface({
+        input: fileStream,
+        crlfDelay: Infinity
+      });
+
+      for await (const line of rl) {
+        lineNumber++;
+        if (!line.trim()) continue;
+        
+        try {
+          const msg: TranscriptMessage = JSON.parse(line);
+          const result = processor(msg, lineNumber);
+          if (result !== null) {
+            results.push(result);
+          }
+        } catch (e) {
+          // Skip malformed lines
+        }
+      }
+    } catch (error) {
+      // Return partial results if stream fails
+    }
+
+    return results;
+  }
+
+  /**
+   * Reads the last message from JSONL file that matches criteria
+   */
+  static async readLastMessage(
+    filePath: string,
+    filter?: (msg: TranscriptMessage) => boolean
+  ): Promise<TranscriptMessage | null> {
+    let lastMessage: TranscriptMessage | null = null;
+
+    await this.streamMessages(filePath, (msg) => {
+      if (!filter || filter(msg)) {
+        lastMessage = msg;
+      }
+      return null;
+    });
+
+    return lastMessage;
+  }
+
+  /**
+   * Helper to parse a single JSONL line consistently
+   */
+  private static parseJsonlLine(line: string): JsonlMessage | null {
+    try {
+      const parsed = JSON.parse(line);
+      // Extract usage data - could be at root level or inside message object
+      const usage = parsed.usage || parsed.message?.usage;
+      const messageId = parsed.message?.id || parsed.id || parsed.uuid;
+      
+      const result: JsonlMessage = {
+        id: messageId,
+        timestamp: new Date(parsed.timestamp || 0).getTime(),
+        usage: usage,
+        content: parsed
+      };
+      
+      // Only add isSidechain if it exists in parsed data
+      if (parsed.isSidechain !== undefined) {
+        result.isSidechain = parsed.isSidechain;
+      }
+      
+      return result;
+    } catch (error) {
+      return null;
+    }
+  }
+}
+
+export function parseJsonl(filePath: string): JsonlMessage[] {
+  return JsonlReader.parseJsonl(filePath);
 }
 
 export function findJsonlPath(sessionId: string): string | null {

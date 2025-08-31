@@ -1,13 +1,21 @@
-import { parseJsonl, findJsonlPath, getAssistantMessageCount } from './jsonl-utils';
+import { parseJsonl, findJsonlPath, getAssistantMessageCount, JsonlReader } from './jsonl-utils';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as readline from 'readline';
+import { Readable } from 'stream';
 
 // Mock fs module
 jest.mock('fs', () => ({
   readFileSync: jest.fn(),
   existsSync: jest.fn(),
-  readdirSync: jest.fn()
+  readdirSync: jest.fn(),
+  createReadStream: jest.fn()
+}));
+
+// Mock readline module for JsonlReader.streamMessages
+jest.mock('readline', () => ({
+  createInterface: jest.fn()
 }));
 
 // Mock os module
@@ -17,6 +25,7 @@ jest.mock('os', () => ({
 }));
 
 const mockedFs = jest.mocked(fs);
+const mockedReadline = jest.mocked(readline);
 
 describe('jsonl-utils', () => {
   beforeEach(() => {
@@ -351,6 +360,274 @@ describe('jsonl-utils', () => {
       const result = getAssistantMessageCount(sessionId);
 
       expect(result).toBe(4); // All messages with defined usage fields (msg-6 and msg-7 don't have usage)
+    });
+  });
+
+  describe('JsonlReader', () => {
+    describe('streamMessages', () => {
+      const mockCreateAsyncIterator = (lines: string[]) => {
+        const mockRl = {
+          [Symbol.asyncIterator]: async function* () {
+            for (const line of lines) {
+              yield line;
+            }
+          }
+        };
+        
+        mockedReadline.createInterface.mockReturnValue(mockRl as any);
+      };
+
+      it('should process messages from JSONL file with processor function', async () => {
+        const testPath = '/test/session.jsonl';
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","usage":{"input_tokens":100,"output_tokens":50}}',
+          '{"message":{"id":"msg-2","usage":{"cache_creation_input_tokens":200}}}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const processedResults: any[] = [];
+        const processor = (msg: any, lineNumber: number) => {
+          processedResults.push({ msg, lineNumber });
+          return msg.id || msg.message?.id;
+        };
+
+        const result = await JsonlReader.streamMessages(testPath, processor);
+
+        expect(processedResults).toHaveLength(2);
+        expect(processedResults[0].lineNumber).toBe(1);
+        expect(processedResults[1].lineNumber).toBe(2);
+        expect(result).toEqual(['msg-1', 'msg-2']);
+      });
+
+      it('should handle non-existent file gracefully', async () => {
+        mockedFs.existsSync.mockReturnValue(false);
+
+        const processor = jest.fn();
+        const result = await JsonlReader.streamMessages('/non/existent.jsonl', processor);
+
+        expect(result).toEqual([]);
+        expect(processor).not.toHaveBeenCalled();
+        expect(mockedFs.createReadStream).not.toHaveBeenCalled();
+      });
+
+      it('should skip empty lines and continue processing', async () => {
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","usage":{"input_tokens":100}}',
+          '',
+          '   ',
+          '{"id":"msg-2","usage":{"output_tokens":50}}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const processedMessages: any[] = [];
+        const processor = (msg: any) => {
+          processedMessages.push(msg);
+          return msg.id;
+        };
+
+        const result = await JsonlReader.streamMessages('/test/file.jsonl', processor);
+
+        expect(processedMessages).toHaveLength(2);
+        expect(result).toEqual(['msg-1', 'msg-2']);
+      });
+
+      it('should handle malformed JSON lines gracefully', async () => {
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","usage":{"input_tokens":100}}',
+          '{invalid json}',
+          '{"id":"msg-2","usage":{"output_tokens":50}}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const processedMessages: any[] = [];
+        const processor = (msg: any) => {
+          processedMessages.push(msg);
+          return msg.id;
+        };
+
+        const result = await JsonlReader.streamMessages('/test/file.jsonl', processor);
+
+        expect(processedMessages).toHaveLength(2);
+        expect(processedMessages[0].id).toBe('msg-1');
+        expect(processedMessages[1].id).toBe('msg-2');
+        expect(result).toEqual(['msg-1', 'msg-2']);
+      });
+
+      it('should handle stream errors and return partial results', async () => {
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockImplementation(() => {
+          throw new Error('Stream error');
+        });
+
+        const processor = jest.fn((msg) => msg.id);
+        const result = await JsonlReader.streamMessages('/error/file.jsonl', processor);
+
+        expect(result).toEqual([]);
+        expect(processor).not.toHaveBeenCalled();
+      });
+
+      it('should filter null results from processor', async () => {
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","usage":{"input_tokens":100}}',
+          '{"id":"msg-2","no_usage":true}',
+          '{"id":"msg-3","usage":{"output_tokens":50}}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const processor = (msg: any) => {
+          // Only return messages with usage
+          return msg.usage ? msg.id : null;
+        };
+
+        const result = await JsonlReader.streamMessages('/test/file.jsonl', processor);
+
+        expect(result).toEqual(['msg-1', 'msg-3']);
+      });
+    });
+
+    describe('readLastMessage', () => {
+      const mockCreateAsyncIterator = (lines: string[]) => {
+        const mockRl = {
+          [Symbol.asyncIterator]: async function* () {
+            for (const line of lines) {
+              yield line;
+            }
+          }
+        };
+        
+        mockedReadline.createInterface.mockReturnValue(mockRl as any);
+      };
+
+      it('should return the last message that matches filter', async () => {
+        const testPath = '/test/session.jsonl';
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","type":"user"}',
+          '{"id":"msg-2","usage":{"input_tokens":100}}',
+          '{"id":"msg-3","type":"user"}',
+          '{"id":"msg-4","usage":{"output_tokens":50}}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const filter = (msg: any) => !!msg.usage;
+        const result = await JsonlReader.readLastMessage(testPath, filter);
+
+        expect(result).toBeTruthy();
+        expect(result?.id).toBe('msg-4');
+        expect(result?.usage?.output_tokens).toBe(50);
+      });
+
+      it('should return the last message when no filter provided', async () => {
+        const testPath = '/test/session.jsonl';
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","type":"user"}',
+          '{"id":"msg-2","usage":{"input_tokens":100}}',
+          '{"id":"msg-3","type":"assistant"}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const result = await JsonlReader.readLastMessage(testPath);
+
+        expect(result).toBeTruthy();
+        expect(result?.id).toBe('msg-3');
+        expect(result?.type).toBe('assistant');
+      });
+
+      it('should return null when no messages match filter', async () => {
+        const testPath = '/test/session.jsonl';
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","type":"user"}',
+          '{"id":"msg-2","type":"user"}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const filter = (msg: any) => !!msg.usage; // Looking for messages with usage
+        const result = await JsonlReader.readLastMessage(testPath, filter);
+
+        expect(result).toBeNull();
+      });
+
+      it('should return null for non-existent file', async () => {
+        mockedFs.existsSync.mockReturnValue(false);
+
+        const result = await JsonlReader.readLastMessage('/non/existent.jsonl');
+
+        expect(result).toBeNull();
+      });
+
+      it('should handle empty file', async () => {
+        const testPath = '/test/empty.jsonl';
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        mockCreateAsyncIterator([]);
+
+        const result = await JsonlReader.readLastMessage(testPath);
+
+        expect(result).toBeNull();
+      });
+
+      it('should handle malformed JSON gracefully and return last valid message', async () => {
+        const testPath = '/test/session.jsonl';
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+        const lines = [
+          '{"id":"msg-1","type":"user"}',
+          '{invalid json}',
+          '{"id":"msg-2","type":"assistant"}'
+        ];
+
+        mockCreateAsyncIterator(lines);
+
+        const result = await JsonlReader.readLastMessage(testPath);
+
+        expect(result).toBeTruthy();
+        expect(result?.id).toBe('msg-2');
+      });
+    });
+
+    describe('parseJsonl (static method)', () => {
+      it('should delegate to the original parseJsonl function', () => {
+        const testPath = '/test/session.jsonl';
+        const jsonlContent = '{"id":"msg-1","usage":{"input_tokens":100}}';
+        
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.readFileSync.mockReturnValue(jsonlContent);
+
+        const result = JsonlReader.parseJsonl(testPath);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('msg-1');
+        expect(result[0].usage?.input_tokens).toBe(100);
+      });
     });
   });
 });

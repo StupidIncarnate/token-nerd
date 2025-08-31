@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import * as readline from 'readline';
+import { JsonlReader, TranscriptMessage } from './jsonl-utils';
 
 interface TokenUsage {
   input_tokens?: number;
@@ -13,13 +13,6 @@ interface TokenUsage {
   };
 }
 
-interface TranscriptMessage {
-  type?: string;
-  usage?: TokenUsage;
-  message?: {
-    usage?: TokenUsage;
-  };
-}
 
 /**
  * Gets accurate token count from JSONL transcript file
@@ -33,34 +26,22 @@ export async function getTokenCount(transcriptPath: string): Promise<number> {
   let highestTotal = 0;
 
   try {
-    const fileStream = fs.createReadStream(transcriptPath);
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity
-    });
-
-    for await (const line of rl) {
-      if (!line.trim()) continue;
+    await JsonlReader.streamMessages(transcriptPath, (msg) => {
+      // Check both .usage and .message.usage (different message formats)
+      const usage = msg.usage || msg.message?.usage;
       
-      try {
-        const msg: TranscriptMessage = JSON.parse(line);
+      if (usage) {
+        // Calculate total for this message
+        const messageTotal = calculateCumulativeTotal(usage);
         
-        // Check both .usage and .message.usage (different message formats)
-        const usage = msg.usage || msg.message?.usage;
-        
-        if (usage) {
-          // Calculate total for this message
-          const messageTotal = calculateCumulativeTotal(usage);
-          
-          // Track the highest total we've seen (tokens accumulate)
-          if (messageTotal > highestTotal) {
-            highestTotal = messageTotal;
-          }
+        // Track the highest total we've seen (tokens accumulate)
+        if (messageTotal > highestTotal) {
+          highestTotal = messageTotal;
         }
-      } catch (e) {
-        // Skip malformed lines
       }
-    }
+      
+      return null; // We don't need to collect results, just track highestTotal
+    });
   } catch (error) {
     // Fall back to file size estimate if parsing fails
     try {
@@ -86,29 +67,17 @@ export async function getCurrentTokenCount(transcriptPath: string): Promise<numb
   let lastTotal = 0;
 
   try {
-    const fileStream = fs.createReadStream(transcriptPath);
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity
-    });
-
-    for await (const line of rl) {
-      if (!line.trim()) continue;
+    await JsonlReader.streamMessages(transcriptPath, (msg) => {
+      // Check both .usage and .message.usage (different message formats)
+      const usage = msg.usage || msg.message?.usage;
       
-      try {
-        const msg: TranscriptMessage = JSON.parse(line);
-        
-        // Check both .usage and .message.usage (different message formats)
-        const usage = msg.usage || msg.message?.usage;
-        
-        if (usage) {
-          // Calculate total for this message - always use the most recent
-          lastTotal = calculateCumulativeTotal(usage);
-        }
-      } catch (e) {
-        // Skip malformed lines
+      if (usage) {
+        // Calculate total for this message - always use the most recent
+        lastTotal = calculateCumulativeTotal(usage);
       }
-    }
+      
+      return null; // We don't need to collect results, just track lastTotal
+    });
   } catch (error) {
     // Fall back to file size estimate if parsing fails
     try {

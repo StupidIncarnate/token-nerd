@@ -22,8 +22,18 @@ jest.mock('readline', () => ({
   createInterface: jest.fn()
 }));
 
+// Mock JsonlReader
+jest.mock('./jsonl-utils', () => ({
+  JsonlReader: {
+    streamMessages: jest.fn()
+  }
+}));
+
+import { JsonlReader } from './jsonl-utils';
+
 const mockedFs = jest.mocked(fs);
 const mockedReadline = jest.mocked(readline);
+const mockedJsonlReader = jest.mocked(JsonlReader);
 
 describe('token-calculator', () => {
   beforeEach(() => {
@@ -31,17 +41,6 @@ describe('token-calculator', () => {
   });
 
   describe('getTokenCount', () => {
-    const mockCreateAsyncIterator = (lines: string[]) => {
-      const mockRl = {
-        [Symbol.asyncIterator]: async function* () {
-          for (const line of lines) {
-            yield line;
-          }
-        }
-      };
-      
-      mockedReadline.createInterface.mockReturnValue(mockRl as any);
-    };
 
     it('should return 0 for non-existent file', async () => {
       mockedFs.existsSync.mockReturnValue(false);
@@ -54,15 +53,17 @@ describe('token-calculator', () => {
 
     it('should calculate highest cumulative total from JSONL messages', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockReturnValue(new Readable() as any);
-
-      const lines = [
-        '{"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":25}}',
-        '{"usage":{"input_tokens":200,"output_tokens":75,"cache_creation_input_tokens":100}}',
-        '{"message":{"usage":{"input_tokens":300,"output_tokens":100,"cache_read_input_tokens":150}}}'
+      
+      const messages = [
+        {usage: {input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 25}},
+        {usage: {input_tokens: 200, output_tokens: 75, cache_creation_input_tokens: 100}},
+        {message: {usage: {input_tokens: 300, output_tokens: 100, cache_read_input_tokens: 150}}}
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getTokenCount('/test/session.jsonl');
 
@@ -72,16 +73,18 @@ describe('token-calculator', () => {
 
     it('should track cumulative growth correctly', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockReturnValue(new Readable() as any);
-
-      const lines = [
-        '{"usage":{"input_tokens":100,"output_tokens":50}}', // Total: 150
-        '{"usage":{"input_tokens":200,"output_tokens":75,"cache_creation_input_tokens":100}}', // Total: 375  
-        '{"usage":{"input_tokens":150,"output_tokens":25}}', // Total: 175 (lower than previous)
-        '{"usage":{"input_tokens":400,"output_tokens":100,"cache_read_input_tokens":200}}' // Total: 700 (highest)
+      
+      const messages = [
+        {usage: {input_tokens: 100, output_tokens: 50}}, // Total: 150
+        {usage: {input_tokens: 200, output_tokens: 75, cache_creation_input_tokens: 100}}, // Total: 375  
+        {usage: {input_tokens: 150, output_tokens: 25}}, // Total: 175 (lower than previous)
+        {usage: {input_tokens: 400, output_tokens: 100, cache_read_input_tokens: 200}} // Total: 700 (highest)
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getTokenCount('/test/session.jsonl');
 
@@ -90,16 +93,18 @@ describe('token-calculator', () => {
 
     it('should handle messages without usage gracefully', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockReturnValue(new Readable() as any);
-
-      const lines = [
-        '{"id":"msg-1","timestamp":"2024-01-01T10:00:00Z"}',
-        '{"usage":{"input_tokens":100,"output_tokens":50}}',
-        '{"content":"no usage data"}',
-        '{"usage":{"input_tokens":200,"output_tokens":75}}'
+      
+      const messages = [
+        {id: "msg-1", timestamp: "2024-01-01T10:00:00Z"},
+        {usage: {input_tokens: 100, output_tokens: 50}},
+        {content: "no usage data"},
+        {usage: {input_tokens: 200, output_tokens: 75}}
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getTokenCount('/test/session.jsonl');
 
@@ -108,16 +113,16 @@ describe('token-calculator', () => {
 
     it('should skip malformed JSON lines', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockReturnValue(new Readable() as any);
-
-      const lines = [
-        '{"usage":{"input_tokens":100,"output_tokens":50}}',
-        '{invalid json}',
-        '',
-        '{"usage":{"input_tokens":200,"output_tokens":75}}'
+      
+      const messages = [
+        {usage: {input_tokens: 100, output_tokens: 50}},
+        {usage: {input_tokens: 200, output_tokens: 75}}
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getTokenCount('/test/session.jsonl');
 
@@ -126,17 +131,16 @@ describe('token-calculator', () => {
 
     it('should skip empty lines', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockReturnValue(new Readable() as any);
-
-      const lines = [
-        '',
-        '   ',
-        '{"usage":{"input_tokens":100,"output_tokens":50}}',
-        '\t',
-        '{"usage":{"input_tokens":200,"output_tokens":75}}'
+      
+      const messages = [
+        {usage: {input_tokens: 100, output_tokens: 50}},
+        {usage: {input_tokens: 200, output_tokens: 75}}
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getTokenCount('/test/session.jsonl');
 
@@ -145,9 +149,7 @@ describe('token-calculator', () => {
 
     it('should fall back to file size estimation on parse error', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockImplementation(() => {
-        throw new Error('Stream error');
-      });
+      mockedJsonlReader.streamMessages.mockRejectedValue(new Error('Stream error'));
       mockedFs.statSync.mockReturnValue({ size: 10000 } as any);
 
       const result = await getTokenCount('/test/session.jsonl');
@@ -158,9 +160,7 @@ describe('token-calculator', () => {
 
     it('should return 0 on both parse and stat errors', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockImplementation(() => {
-        throw new Error('Stream error');
-      });
+      mockedJsonlReader.streamMessages.mockRejectedValue(new Error('Stream error'));
       mockedFs.statSync.mockImplementation(() => {
         throw new Error('Stat error');
       });
@@ -172,14 +172,16 @@ describe('token-calculator', () => {
 
     it('should handle nested usage in message object', async () => {
       mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.createReadStream.mockReturnValue(new Readable() as any);
-
-      const lines = [
-        '{"message":{"usage":{"input_tokens":100,"output_tokens":50}}}',
-        '{"usage":{"input_tokens":200,"output_tokens":75}}' // Direct usage should also work
+      
+      const messages = [
+        {message: {usage: {input_tokens: 100, output_tokens: 50}}},
+        {usage: {input_tokens: 200, output_tokens: 75}} // Direct usage should also work
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getTokenCount('/test/session.jsonl');
 
@@ -188,17 +190,6 @@ describe('token-calculator', () => {
   });
 
   describe('getCurrentTokenCount', () => {
-    const mockCreateAsyncIterator = (lines: string[]) => {
-      const mockRl = {
-        [Symbol.asyncIterator]: async function* () {
-          for (const line of lines) {
-            yield line;
-          }
-        }
-      };
-      
-      mockedReadline.createInterface.mockReturnValue(mockRl as any);
-    };
 
     it('should return 0 for non-existent file', async () => {
       mockedFs.existsSync.mockReturnValue(false);
@@ -212,13 +203,16 @@ describe('token-calculator', () => {
     it('should return token count from last message with usage data', async () => {
       mockedFs.existsSync.mockReturnValue(true);
       
-      const lines = [
-        '{"type":"user","message":{"content":"hi"}}', // no usage
-        '{"type":"assistant","message":{"usage":{"input_tokens":50,"output_tokens":25}}}',
-        '{"type":"assistant","message":{"usage":{"input_tokens":100,"output_tokens":50}}}' // this should be returned
+      const messages = [
+        {type: "user", message: {content: "hi"}}, // no usage
+        {type: "assistant", message: {usage: {input_tokens: 50, output_tokens: 25}}},
+        {type: "assistant", message: {usage: {input_tokens: 100, output_tokens: 50}}} // this should be returned
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getCurrentTokenCount('/test/session.jsonl');
 
@@ -228,12 +222,15 @@ describe('token-calculator', () => {
     it('should handle cache tokens in last message', async () => {
       mockedFs.existsSync.mockReturnValue(true);
       
-      const lines = [
-        '{"usage":{"input_tokens":200,"output_tokens":100}}', // older message
-        '{"message":{"usage":{"input_tokens":50,"output_tokens":25,"cache_read_input_tokens":75,"cache_creation_input_tokens":50}}}' // last message
+      const messages = [
+        {usage: {input_tokens: 200, output_tokens: 100}}, // older message
+        {message: {usage: {input_tokens: 50, output_tokens: 25, cache_read_input_tokens: 75, cache_creation_input_tokens: 50}}} // last message
       ];
 
-      mockCreateAsyncIterator(lines);
+      mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+        messages.forEach((msg, index) => processor(msg as any, index + 1));
+        return [];
+      });
 
       const result = await getCurrentTokenCount('/test/session.jsonl');
 
