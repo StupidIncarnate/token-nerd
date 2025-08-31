@@ -3,6 +3,7 @@ import { correlateOperations, Bundle, Operation, getLinkedOperations } from './c
 import { getCurrentTokenCount, calculateCumulativeTotal, calculateRemainingCapacity, estimateTokensFromContent } from './token-calculator';
 import { GenericListView, ListItem, ListView, ListActions } from './generic-list-view';
 import * as readline from 'readline';
+import { TIME_CONSTANTS } from '../config';
 
 type SortMode = 'time' | 'tokens' | 'operation';
 
@@ -736,7 +737,7 @@ class TokenAnalyzer {
       } else if (operation.tool === 'User') {
         allLines.push(`│ Message Length: ${operation.responseSize} chars`);
         allLines.push(`│ Estimated Tokens: ~${operation.tokens.toLocaleString()}`);
-        if (operation.timeGap && operation.timeGap > 300) {
+        if (operation.timeGap && operation.timeGap > TIME_CONSTANTS.CACHE_EXPIRY_SECONDS) {
           allLines.push(`│ ⚠️ Time Gap: ${Math.round(operation.timeGap/60)} minutes (cache may expire)`);
         }
         allLines.push(`│ Timestamp: ${new Date(operation.timestamp).toLocaleString()}`);
@@ -773,7 +774,7 @@ class TokenAnalyzer {
           allLines.push(`│ Cache Efficiency: ${operation.cacheEfficiency.toFixed(1)}%${operation.cacheEfficiency < 50 ? ' ⚠️ LOW' : ''}`);
         }
         
-        if (operation.timeGap && operation.timeGap > 300) {
+        if (operation.timeGap && operation.timeGap > TIME_CONSTANTS.CACHE_EXPIRY_SECONDS) {
           allLines.push(`│ ⚠️ Time Gap: ${Math.round(operation.timeGap/60)} minutes (cache expired)`);
         }
         

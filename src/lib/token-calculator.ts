@@ -114,7 +114,9 @@ export function calculateConversationGrowth(usage: TokenUsage): number {
  * Calculate remaining context window capacity
  * Claude Sonnet 4 has 200k token limit
  */
-export function calculateRemainingCapacity(currentTotal: number, contextWindowLimit: number = 200000): {
+import { TOKEN_LIMITS, CALCULATION_CONSTANTS } from '../config';
+
+export function calculateRemainingCapacity(currentTotal: number, contextWindowLimit: number = TOKEN_LIMITS.LEGACY_DEFAULT): {
   remaining: number;
   percentage: number;
   isNearLimit: boolean;
@@ -128,11 +130,11 @@ export function calculateRemainingCapacity(currentTotal: number, contextWindowLi
 
 /**
  * Rough estimation of tokens from content string or size
- * Using simple heuristic: ~3.7 chars per token (consistent across codebase)
+ * Using simple heuristic from config (consistent across codebase)
  */
 export function estimateTokensFromContent(content: string): number;
 export function estimateTokensFromContent(size: number): number;
 export function estimateTokensFromContent(input: string | number): number {
   const length = typeof input === 'string' ? input.length : input;
-  return Math.ceil(length / 3.7);
+  return Math.ceil(length / CALCULATION_CONSTANTS.CHARS_PER_TOKEN_ESTIMATE);
 }

@@ -1,21 +1,24 @@
 /**
- * Shared configuration for Token Nerd statusline integration
- * Central place for limits, thresholds, and calculations
+ * Statusline-specific configuration for Token Nerd
+ * Imports shared constants and provides statusline-specific logic
  */
 
-// Token limits by model (discovered through testing)
-export const TOKEN_LIMITS = {
-  'claude-opus-4-1': 156000,      // Compacts at ~156k
-  'claude-sonnet-4': 156000,      // Appears to be same
-  'default': 156000                // Use 156k as default (not 200k!)
-} as const;
+import {
+  TOKEN_LIMITS,
+  CALCULATION_CONSTANTS,
+  ALERT_THRESHOLDS,
+  UI_CONSTANTS
+} from '../config';
 
-// Alert thresholds
+// Re-export shared constants for backwards compatibility
+export { TOKEN_LIMITS };
+
+// Statusline-specific thresholds (combines shared constants with local ones)
 export const THRESHOLDS = {
-  SPIKE_TOKENS: 10000,           // Alert on jumps > 10k
-  DANGER_PERCENT: 85,             // Red alert at 85%
-  WARNING_PERCENT: 70,            // Yellow warning at 70%
-  MONITOR_INTERVAL: 2000,         // Check every 2 seconds
+  SPIKE_TOKENS: CALCULATION_CONSTANTS.SPIKE_THRESHOLD_TOKENS,
+  DANGER_PERCENT: ALERT_THRESHOLDS.DANGER_PERCENT,
+  WARNING_PERCENT: ALERT_THRESHOLDS.WARNING_PERCENT,
+  MONITOR_INTERVAL: UI_CONSTANTS.MONITOR_INTERVAL_MS,
 } as const;
 
 export interface TokenStatus {

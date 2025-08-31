@@ -2,6 +2,7 @@ import * as path from 'path';
 import { JsonlMessage } from './jsonl-utils';
 import { estimateTokensFromContent } from './token-calculator';
 import { Operation } from './correlation-engine';
+import { TIME_CONSTANTS } from '../config';
 
 export function calculateCacheEfficiency(contextGrowth: number, cacheRead: number): number {
   const totalProcessed = contextGrowth + cacheRead;
@@ -32,7 +33,7 @@ export function extractToolUseDetails(messageContent: any, timeGap: number): { d
   const hasToolUse = Array.isArray(messageContent) && messageContent.some((c: any) => c.type === 'tool_use');
   
   let details = 'message';
-  if (timeGap > 300) {
+  if (timeGap > TIME_CONSTANTS.CACHE_EXPIRY_SECONDS) {
     details = `⚠️ Cache expired (${Math.round(timeGap/60)}min gap)`;
   }
   
@@ -47,12 +48,12 @@ export function extractToolUseDetails(messageContent: any, timeGap: number): { d
       params = toolUse.input || {};
       const toolDetails = formatOperationDetails(toolName, params);
       details = `${toolName}: ${toolDetails}`;
-      if (timeGap > 300) {
+      if (timeGap > TIME_CONSTANTS.CACHE_EXPIRY_SECONDS) {
         details = `⚠️ ${details} (cache expired)`;
       }
     } else {
       details = `${toolUses.length} tool calls`;
-      if (timeGap > 300) {
+      if (timeGap > TIME_CONSTANTS.CACHE_EXPIRY_SECONDS) {
         details = `⚠️ ${details} (cache expired)`;
       }
     }
