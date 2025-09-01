@@ -5,8 +5,7 @@ import {
   createSubAgentBundle,
   processSubAgents
 } from './sub-agent-processor';
-import { Bundle, Operation } from './correlation-engine';
-import { JsonlMessage } from './jsonl-utils';
+import type { Bundle, Operation, JsonlMessage } from '../types';
 
 describe('sub-agent-processor', () => {
   const mockOperation: Operation = {

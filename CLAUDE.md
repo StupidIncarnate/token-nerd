@@ -15,6 +15,8 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 
 ## Technical Approach
 
+Types and interfaces for the project are located in `/src/types`. Make sure to reference these when making any code changes.
+
 ## Coding Standards
 
 ### Function Design Principles
@@ -29,6 +31,7 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 - **Maximum 200 lines per file**: Consider separation when files grow larger
 - **Logical groupings**: Group related functions into focused modules
 - **Clear dependencies**: Import only what you need, avoid circular dependencies
+- **Types are stored in one folder**: When making new types or interfaces, they must be stored in `src/types`, not in the implementation file. 
 
 ### Type Safety Requirements
 - **No `any` types**: Use proper TypeScript interfaces and union types

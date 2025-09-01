@@ -8,7 +8,7 @@ import {
   createToolResponseOperation,
   createAssistantOperation
 } from './operation-factory';
-import { JsonlMessage } from './jsonl-utils';
+import type { JsonlMessage } from '../types';
 
 describe('operation-factory', () => {
   describe('calculateCacheEfficiency', () => {

@@ -1,5 +1,4 @@
-import { JsonlMessage } from './jsonl-utils';
-import { Operation, Bundle } from './correlation-engine';
+import type { JsonlMessage, Operation, Bundle } from '../types';
 
 export function findTaskBundles(mainBundles: Bundle[]): Bundle[] {
   return mainBundles.filter(b => {
@@ -56,7 +55,7 @@ export function traverseUuidChain(
 export function createSubAgentBundle(taskSidechainBundles: Bundle[], taskUse: any): Bundle {
   const allSubAgentOps: Operation[] = [];
   taskSidechainBundles.forEach(bundle => {
-    bundle.operations.forEach(op => {
+    bundle.operations.forEach((op: Operation) => {
       op.parentTaskId = taskUse.id;
       op.subAgentType = taskUse.input?.subagent_type || 'general-purpose';
       allSubAgentOps.push(op);

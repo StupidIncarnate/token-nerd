@@ -1,4 +1,4 @@
-import { ComponentInstaller, InstallationError } from './types';
+import { ComponentInstaller, InstallationError } from '../types';
 import { BackupManager } from './backup-manager';
 import { StatuslineInstaller } from './statusline-installer';
 

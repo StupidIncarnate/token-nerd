@@ -1,4 +1,4 @@
-export { ComponentInstaller, BackupMetadata, InstallationState, InstallationError } from './types';
+export { ComponentInstaller, BackupMetadata, InstallationState, InstallationError } from '../types';
 export { BackupManager } from './backup-manager';
 export { BaseInstaller } from './base-installer';
 export { StatuslineInstaller } from './statusline-installer';

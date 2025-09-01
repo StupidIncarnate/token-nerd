@@ -1,6 +1,5 @@
 import { detectMessageType, processMessage } from './message-parser';
-import { JsonlMessage } from './jsonl-utils';
-import { Operation } from './correlation-engine';
+import type { JsonlMessage, Operation } from '../types';
 
 describe('message-parser', () => {
   describe('detectMessageType', () => {

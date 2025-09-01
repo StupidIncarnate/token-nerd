@@ -1,4 +1,5 @@
-import { discoverAllSessions, Session, extractProjectName, isSessionActive, getAssistantMessageCount } from './session-utils';
+import { discoverAllSessions, extractProjectName, isSessionActive, getAssistantMessageCount } from './session-utils';
+import type { Session } from '../types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

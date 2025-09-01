@@ -1,7 +1,8 @@
 import * as path from 'path';
 import * as os from 'os';
 import inquirer from 'inquirer';
-import { discoverAllSessions, Session, extractProjectName } from './session-utils';
+import { discoverAllSessions, extractProjectName } from './session-utils';
+import type { Session } from '../types';
 
 // Dynamic project name extraction utility for tree view (enhanced version)
 function extractProjectNameForTreeView(projectDir: string): string {
@@ -25,18 +26,7 @@ function extractProjectNameForTreeView(projectDir: string): string {
   }
 }
 
-interface ProjectNode {
-  name: string;
-  path: string;
-  sessions: Session[];
-  isExpanded: boolean;
-  isCurrentProject: boolean;
-}
-
-interface TreeViewOptions {
-  autoExpandCurrent?: boolean;
-  highlightFirst?: boolean;
-}
+import type { ProjectNode, TreeViewOptions } from '../types';
 
 export class SessionTreeView {
   private projects: Map<string, ProjectNode> = new Map();

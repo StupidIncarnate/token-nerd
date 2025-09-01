@@ -1,4 +1,4 @@
-import { Operation, Bundle } from './correlation-engine';
+import type { Operation, Bundle } from '../types';
 import { formatOperationDetails } from './operation-factory';
 
 export function getLinkedOperations(bundles: Bundle[], targetToolUseId: string): Operation[] {

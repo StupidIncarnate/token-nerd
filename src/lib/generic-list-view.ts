@@ -1,38 +1,5 @@
 // Generic reusable terminal list view component
-export interface ListItem {
-  id: string;
-  timestamp: number;
-  icon: string;
-  title: string;
-  subtitle: string;
-  metadata: string;
-  isChild?: boolean;
-  canExpand?: boolean;
-  isExpanded?: boolean;
-}
-
-export interface ListView {
-  header: string;
-  items: ListItem[];
-  selectedIndex: number;
-  sortMode?: string;
-  sortAscending?: boolean;
-  pagination?: {
-    currentPage: number;
-    totalPages: number;
-    itemsPerPage: number;
-    startIndex: number;
-    endIndex: number;
-  };
-}
-
-export interface ListActions {
-  onSelect: (item: ListItem, index: number) => void;
-  onBack: () => void;
-  onQuit: () => void;
-  onToggleExpand?: (item: ListItem, index: number) => void;
-  onSelectionChange?: (newIndex: number) => void;
-}
+import type { ListItem, ListView, ListActions } from '../types';
 
 export class GenericListView {
   private view: ListView;

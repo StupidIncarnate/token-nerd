@@ -1,7 +1,6 @@
 import * as path from 'path';
-import { JsonlMessage } from './jsonl-utils';
+import type { JsonlMessage, Operation } from '../types';
 import { estimateTokensFromContent } from './token-calculator';
-import { Operation } from './correlation-engine';
 import { TIME_CONSTANTS } from '../config';
 
 export function calculateCacheEfficiency(contextGrowth: number, cacheRead: number): number {

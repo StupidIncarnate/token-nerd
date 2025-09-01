@@ -1,15 +1,7 @@
-import { JsonlMessage } from './jsonl-utils';
-import { Operation, Bundle } from './correlation-engine';
+import type { JsonlMessage } from '../types';
+import type { Operation, Bundle } from '../types';
 
-export type MessageType = 'system' | 'user' | 'toolResult' | 'assistant' | 'unknown';
-
-export interface MessageInfo {
-  type: MessageType;
-  isUser: boolean;
-  isAssistant: boolean;
-  isSystem: boolean;
-  isToolResult: boolean;
-}
+import type { MessageType, MessageInfo } from '../types';
 
 export function detectMessageType(msg: JsonlMessage): MessageInfo {
   const isUser = msg.content?.type === 'user' || msg.content?.message?.role === 'user';

@@ -1,4 +1,5 @@
-import { correlateOperations, Bundle, getLinkedOperations } from './correlation-engine';
+import { correlateOperations, getLinkedOperations } from './correlation-engine';
+import type { Bundle } from '../types';
 import * as fs from 'fs';
 
 // Mock console methods to prevent test output clutter

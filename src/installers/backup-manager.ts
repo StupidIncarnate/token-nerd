@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { BackupMetadata, InstallationState } from './types';
+import { BackupMetadata, InstallationState } from '../types';
 import { getClaudeDir } from './utils';
 
 export class BackupManager {

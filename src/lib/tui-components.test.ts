@@ -1,5 +1,6 @@
 import { launchTUI } from './tui-components';
-import { correlateOperations, getLinkedOperations, Bundle, Operation } from './correlation-engine';
+import { correlateOperations, getLinkedOperations } from './correlation-engine';
+import type { Bundle, Operation } from '../types';
 
 // Mock correlation engine
 jest.mock('./correlation-engine', () => ({

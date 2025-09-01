@@ -42,35 +42,7 @@ export async function findSessionJsonl({ sessionId }: { sessionId: string }): Pr
   }
 }
 
-export interface JsonlMessage {
-  id: string;
-  timestamp: number;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-    cache_creation?: {
-      ephemeral_5m_input_tokens?: number;
-      ephemeral_1h_input_tokens?: number;
-    };
-  };
-  content?: any;
-  isSidechain?: boolean; // True if this message is part of a sub-agent execution
-}
-
-export interface TranscriptMessage {
-  type?: string;
-  usage?: JsonlMessage['usage'];
-  message?: {
-    usage?: JsonlMessage['usage'];
-    id?: string;
-  };
-  id?: string;
-  uuid?: string;
-  timestamp?: string;
-  isSidechain?: boolean;
-}
+import type { JsonlMessage, TranscriptMessage, JsonlFileInfo } from '../types';
 
 export class JsonlReader {
   /**
@@ -221,12 +193,6 @@ export function findJsonlPath(sessionId: string): string | null {
  * Securely scan Claude projects directory for JSONL files
  * Returns file information with sanitized paths
  */
-export interface JsonlFileInfo {
-  sessionId: string;
-  projectDir: string;
-  filePath: string;
-  lastModified: Date;
-}
 
 export function scanClaudeProjects(): JsonlFileInfo[] {
   const projectsDir = path.join(os.homedir(), '.claude', 'projects');

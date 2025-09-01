@@ -1,17 +1,8 @@
 import * as fs from 'fs';
-import { JsonlReader, TranscriptMessage } from './jsonl-utils';
+import { JsonlReader } from './jsonl-utils';
+import type { TranscriptMessage } from '../types';
 
-interface TokenUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-  total_tokens?: number;
-  cache_creation?: {
-    ephemeral_5m_input_tokens?: number;
-    ephemeral_1h_input_tokens?: number;
-  };
-}
+import type { TokenUsage } from '../types';
 
 
 /**

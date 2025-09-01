@@ -21,15 +21,7 @@ export const THRESHOLDS = {
   MONITOR_INTERVAL: UI_CONSTANTS.MONITOR_INTERVAL_MS,
 } as const;
 
-export interface TokenStatus {
-  total: number;
-  limit: number;
-  percentage: number;
-  remaining: number;
-  remainingPercent: number;
-  status: 'normal' | 'warning' | 'danger';
-  emoji: string;
-}
+import type { TokenStatus, FormatOptions } from '../types';
 
 // Calculate token percentage and status
 export function calculateTokenStatus(totalTokens: number, model: string = 'default'): TokenStatus {
@@ -60,11 +52,6 @@ export function calculateTokenStatus(totalTokens: number, model: string = 'defau
   };
 }
 
-export interface FormatOptions {
-  showPercentage?: boolean;
-  showWarning?: boolean;
-  showRemaining?: boolean;
-}
 
 // Format token count for display
 export function formatTokenCount(tokens: number, options: FormatOptions = {}): string {

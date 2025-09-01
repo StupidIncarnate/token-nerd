@@ -1,17 +1,11 @@
 import { getCurrentTokenCount } from './token-calculator';
-import { findJsonlPath, parseJsonl, scanClaudeProjects, JsonlFileInfo } from './jsonl-utils';
+import { findJsonlPath, parseJsonl, scanClaudeProjects } from './jsonl-utils';
+import type { JsonlFileInfo } from '../types';
 
 /**
  * Session interface used across the application
  */
-export interface Session {
-  id: string;
-  project: string;
-  tokens: number;
-  lastModified: Date;
-  isActive: boolean;
-  path: string;
-}
+import type { Session } from '../types';
 
 /**
  * Extract project name from Claude Code directory structure

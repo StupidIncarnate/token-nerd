@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { BackupManager } from './backup-manager';
-import { BackupMetadata, InstallationState } from './types';
+import { BackupMetadata, InstallationState } from '../types';
 import { TEST_TEMP_DIR, TEST_CLAUDE_DIR } from '../test-setup';
 
 // Mock console methods to prevent test output clutter

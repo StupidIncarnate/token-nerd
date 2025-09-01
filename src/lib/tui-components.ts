@@ -1,24 +1,10 @@
 // Simplified terminal-based implementation for token analysis
-import { correlateOperations, Bundle, Operation, getLinkedOperations } from './correlation-engine';
+import { correlateOperations, getLinkedOperations } from './correlation-engine';
 import { getCurrentTokenCount, calculateCumulativeTotal, calculateRemainingCapacity, estimateTokensFromContent } from './token-calculator';
-import { GenericListView, ListItem, ListView, ListActions } from './generic-list-view';
+import { GenericListView } from './generic-list-view';
 import * as readline from 'readline';
 import { TIME_CONSTANTS } from '../config';
-
-type SortMode = 'conversation' | 'tokens' | 'operation';
-
-interface TerminalState {
-  bundles: Bundle[];
-  sortMode: SortMode;
-  sortAscending: boolean;
-  selectedIndex: number;
-  expanded: Set<string>;
-  viewingDetails: Bundle | null;
-  viewingSubAgent: Bundle | null; // New state for sub-agent operation list view
-  detailScrollOffset: number;
-  shouldExit: boolean;
-  exitCode: number;
-}
+import type { Bundle, Operation, SortMode, TerminalState, ListItem, ListView, ListActions } from '../types';
 
 // Utility function to calculate operation tokens for sorting
 function getOperationTokens(op: Operation): number {

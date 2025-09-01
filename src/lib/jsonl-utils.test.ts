@@ -1,4 +1,5 @@
-import { parseJsonl, findJsonlPath, JsonlReader, sanitizeSessionId, findSessionJsonl, scanClaudeProjects, JsonlFileInfo } from './jsonl-utils';
+import { parseJsonl, findJsonlPath, JsonlReader, sanitizeSessionId, findSessionJsonl, scanClaudeProjects } from './jsonl-utils';
+import type { JsonlFileInfo } from '../types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

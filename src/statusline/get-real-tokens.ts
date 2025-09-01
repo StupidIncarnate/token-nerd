@@ -9,23 +9,7 @@ import { calculateTokenStatus } from './config';
 import { getCurrentTokenCount } from '../lib/token-calculator';
 import { JsonlReader } from '../lib/jsonl-utils';
 
-interface TokenUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-  total_tokens?: number;
-}
-
-
-interface TokenResult {
-  total: number;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheCreation: number;
-  percentage: number;
-}
+import type { TokenUsage, TokenResult } from '../types';
 
 export async function getRealTokenCount(transcriptPath: string): Promise<TokenResult> {
   const total = await getCurrentTokenCount(transcriptPath);

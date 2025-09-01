@@ -1,5 +1,5 @@
 import { getLinkedOperations, enrichToolResponseDetails } from './correlation-utils';
-import { Bundle, Operation } from './correlation-engine';
+import type { Bundle, Operation } from '../types';
 
 describe('correlation-utils', () => {
   const mockOperation: Operation = {

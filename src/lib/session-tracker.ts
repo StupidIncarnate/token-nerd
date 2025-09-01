@@ -1,5 +1,6 @@
 import inquirer from 'inquirer';
-import { discoverAllSessions, Session } from './session-utils';
+import { discoverAllSessions } from './session-utils';
+import type { Session } from '../types';
 
 export async function selectSession(): Promise<string | null> {
   const sessions = await listSessions();
