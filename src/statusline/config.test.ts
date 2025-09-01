@@ -6,7 +6,7 @@ jest.mock('../config', () => {
   const originalModule = jest.requireActual('../config');
   return {
     ...originalModule,
-    getTokenLimit: jest.fn(() => 200000), // Use 200k for test consistency
+    getTokenLimitSync: jest.fn(() => 200000), // Use 200k for test consistency
   };
 });
 

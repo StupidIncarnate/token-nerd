@@ -1,4 +1,4 @@
-import { isAutoCompactEnabled, getTokenLimit, TOKEN_LIMITS } from './config';
+import { isAutoCompactEnabledSync, getTokenLimitSync, TOKEN_LIMITS } from './config';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -21,11 +21,11 @@ describe('config', () => {
     jest.clearAllMocks();
   });
 
-  describe('isAutoCompactEnabled', () => {
+  describe('isAutoCompactEnabledSync', () => {
     it('should return true when config file does not exist', () => {
       mockFs.existsSync.mockReturnValue(false);
 
-      const result = isAutoCompactEnabled();
+      const result = isAutoCompactEnabledSync();
 
       expect(result).toBe(true);
       expect(mockFs.existsSync).toHaveBeenCalledWith(expect.stringContaining('.claude.json'));
@@ -35,7 +35,7 @@ describe('config', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('{}');
 
-      const result = isAutoCompactEnabled();
+      const result = isAutoCompactEnabledSync();
 
       expect(result).toBe(true);
     });
@@ -44,7 +44,7 @@ describe('config', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('{"autoCompactEnabled": true}');
 
-      const result = isAutoCompactEnabled();
+      const result = isAutoCompactEnabledSync();
 
       expect(result).toBe(true);
     });
@@ -53,7 +53,7 @@ describe('config', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('{"autoCompactEnabled": false}');
 
-      const result = isAutoCompactEnabled();
+      const result = isAutoCompactEnabledSync();
 
       expect(result).toBe(false);
     });
@@ -62,7 +62,7 @@ describe('config', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('invalid json');
 
-      const result = isAutoCompactEnabled();
+      const result = isAutoCompactEnabledSync();
 
       expect(result).toBe(true);
     });
@@ -73,18 +73,18 @@ describe('config', () => {
         throw new Error('Permission denied');
       });
 
-      const result = isAutoCompactEnabled();
+      const result = isAutoCompactEnabledSync();
 
       expect(result).toBe(true);
     });
   });
 
-  describe('getTokenLimit', () => {
+  describe('getTokenLimitSync', () => {
     it('should return AUTO_COMPACT limit when auto-compact is enabled', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('{"autoCompactEnabled": true}');
 
-      const result = getTokenLimit();
+      const result = getTokenLimitSync();
 
       expect(result).toBe(TOKEN_LIMITS.AUTO_COMPACT);
     });
@@ -93,7 +93,7 @@ describe('config', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('{"autoCompactEnabled": false}');
 
-      const result = getTokenLimit();
+      const result = getTokenLimitSync();
 
       expect(result).toBe(TOKEN_LIMITS.NO_AUTO_COMPACT);
     });
@@ -101,7 +101,7 @@ describe('config', () => {
     it('should return AUTO_COMPACT limit by default when config file does not exist', () => {
       mockFs.existsSync.mockReturnValue(false);
 
-      const result = getTokenLimit();
+      const result = getTokenLimitSync();
 
       expect(result).toBe(TOKEN_LIMITS.AUTO_COMPACT);
     });

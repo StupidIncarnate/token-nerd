@@ -522,6 +522,154 @@ describe('jsonl-utils', () => {
         expect(result).toBeTruthy();
         expect(result?.id).toBe('msg-2');
       });
+
+      describe('optimized behavior', () => {
+        it('should use reverse reading for better performance', async () => {
+          const testPath = '/test/session.jsonl';
+          
+          // Mock reverse reader to succeed
+          const mockReverseReader = require('./reverse-reader');
+          jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLine').mockResolvedValue('{"id":"msg-fast","type":"assistant"}');
+          
+          mockedFs.existsSync.mockReturnValue(true);
+
+          const result = await JsonlReader.readLastMessage(testPath);
+
+          expect(result).toBeTruthy();
+          expect(result?.id).toBe('msg-fast');
+          expect(mockReverseReader.ReverseFileReader.readLastLine).toHaveBeenCalledWith({ filePath: testPath });
+          
+          mockReverseReader.ReverseFileReader.readLastLine.mockRestore();
+        });
+
+        it('should fall back to streaming when reverse reading fails', async () => {
+          const testPath = '/test/session.jsonl';
+          
+          // Mock reverse reader to fail
+          const mockReverseReader = require('./reverse-reader');
+          jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLine').mockRejectedValue(new Error('Reverse read failed'));
+          
+          mockedFs.existsSync.mockReturnValue(true);
+          mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+          const lines = [
+            '{"id":"msg-1","type":"user"}',
+            '{"id":"msg-fallback","type":"assistant"}'
+          ];
+
+          mockCreateAsyncIterator(lines);
+
+          const result = await JsonlReader.readLastMessage(testPath);
+
+          expect(result).toBeTruthy();
+          expect(result?.id).toBe('msg-fallback');
+          
+          mockReverseReader.ReverseFileReader.readLastLine.mockRestore();
+        });
+
+        it('should use optimized filter scanning for filtered queries', async () => {
+          const testPath = '/test/session.jsonl';
+          
+          // Mock reverse reader for filter case
+          const mockReverseReader = require('./reverse-reader');
+          jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLines').mockResolvedValue([
+            '{"id":"msg-3","type":"user"}',
+            '{"id":"msg-2","usage":{"input_tokens":50}}',
+            '{"id":"msg-1","type":"user"}'
+          ]);
+          
+          mockedFs.existsSync.mockReturnValue(true);
+
+          const filter = (msg: any) => !!msg.usage;
+          const result = await JsonlReader.readLastMessage(testPath, filter);
+
+          expect(result).toBeTruthy();
+          expect(result?.id).toBe('msg-2');
+          expect(result?.usage?.input_tokens).toBe(50);
+          expect(mockReverseReader.ReverseFileReader.readLastLines).toHaveBeenCalledWith({ 
+            filePath: testPath, 
+            maxLines: 100 
+          });
+          
+          mockReverseReader.ReverseFileReader.readLastLines.mockRestore();
+        });
+
+        it('should fall back to streaming when filtered reverse reading fails', async () => {
+          const testPath = '/test/session.jsonl';
+          
+          // Mock reverse reader to fail for filter case
+          const mockReverseReader = require('./reverse-reader');
+          jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLines').mockRejectedValue(new Error('Filter read failed'));
+          
+          mockedFs.existsSync.mockReturnValue(true);
+          mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+          const lines = [
+            '{"id":"msg-1","type":"user"}',
+            '{"id":"msg-2","usage":{"input_tokens":100}}',
+            '{"id":"msg-3","type":"user"}'
+          ];
+
+          mockCreateAsyncIterator(lines);
+
+          const filter = (msg: any) => !!msg.usage;
+          const result = await JsonlReader.readLastMessage(testPath, filter);
+
+          expect(result).toBeTruthy();
+          expect(result?.id).toBe('msg-2');
+          expect(result?.usage?.input_tokens).toBe(100);
+          
+          mockReverseReader.ReverseFileReader.readLastLines.mockRestore();
+        });
+
+        it('should handle corrupted JSON in reverse reading gracefully', async () => {
+          const testPath = '/test/session.jsonl';
+          
+          // Mock reverse reader to return invalid JSON, then fall back
+          const mockReverseReader = require('./reverse-reader');
+          jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLine').mockResolvedValue('invalid json}');
+          
+          mockedFs.existsSync.mockReturnValue(true);
+          mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+          const lines = [
+            '{"id":"msg-valid","type":"assistant"}'
+          ];
+
+          mockCreateAsyncIterator(lines);
+
+          const result = await JsonlReader.readLastMessage(testPath);
+
+          expect(result).toBeTruthy();
+          expect(result?.id).toBe('msg-valid');
+          
+          mockReverseReader.ReverseFileReader.readLastLine.mockRestore();
+        });
+
+        it('should handle empty reverse reading results gracefully', async () => {
+          const testPath = '/test/session.jsonl';
+          
+          // Mock reverse reader to return null/empty
+          const mockReverseReader = require('./reverse-reader');
+          jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLine').mockResolvedValue(null);
+          
+          mockedFs.existsSync.mockReturnValue(true);
+          mockedFs.createReadStream.mockReturnValue(new Readable() as any);
+
+          const lines = [
+            '{"id":"msg-fallback","type":"assistant"}'
+          ];
+
+          mockCreateAsyncIterator(lines);
+
+          const result = await JsonlReader.readLastMessage(testPath);
+
+          expect(result).toBeTruthy();
+          expect(result?.id).toBe('msg-fallback');
+          
+          mockReverseReader.ReverseFileReader.readLastLine.mockRestore();
+        });
+      });
     });
 
     describe('parseJsonl (static method)', () => {

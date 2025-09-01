@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
 import { getClaudeProjectsDir } from './claude-path-resolver';
+import { ReverseFileReader } from './reverse-reader';
 
 /**
  * Sanitizes session ID to prevent shell injection attacks
@@ -111,11 +112,52 @@ export class JsonlReader {
 
   /**
    * Reads the last message from JSONL file that matches criteria
+   * OPTIMIZED: Uses reverse file reading instead of streaming entire file
+   * Falls back to streaming for complex filters or when reverse reading fails
    */
   static async readLastMessage(
     filePath: string,
     filter?: (msg: TranscriptMessage) => boolean
   ): Promise<TranscriptMessage | null> {
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+
+    try {
+      // Try optimized reverse reading first
+      if (!filter) {
+        // Simple case: just get the last line
+        const lastLine = await ReverseFileReader.readLastLine({ filePath });
+        if (lastLine) {
+          try {
+            return JSON.parse(lastLine) as TranscriptMessage;
+          } catch {
+            // Fall through to streaming approach if parsing fails
+          }
+        }
+      } else {
+        // With filter: scan recent lines efficiently
+        const recentLines = await ReverseFileReader.readLastLines({ 
+          filePath, 
+          maxLines: 100 
+        });
+        
+        for (const line of recentLines) {
+          try {
+            const msg: TranscriptMessage = JSON.parse(line);
+            if (filter(msg)) {
+              return msg;
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+    } catch (reverseError) {
+      // Fall back to original streaming approach if reverse reading fails
+    }
+
+    // Fallback: use original streaming approach for compatibility
     let lastMessage: TranscriptMessage | null = null;
 
     await this.streamMessages(filePath, (msg) => {

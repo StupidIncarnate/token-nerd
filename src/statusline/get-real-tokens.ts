@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import { calculateTokenStatus } from './config';
 import { getCurrentTokenCount } from '../lib/token-calculator';
 import { JsonlReader } from '../lib/jsonl-utils';
+import { ReverseFileReader } from '../lib/reverse-reader';
 
 import type { TokenUsage, TokenResult } from '../types';
 
@@ -19,24 +20,55 @@ export async function getRealTokenCount(transcriptPath: string): Promise<TokenRe
   }
 
   // Get detailed breakdown from last message for statusline details
+  // OPTIMIZED: Use reverse reading to find the last message with usage efficiently
   let lastMessageWithUsage: TokenUsage | null = null;
 
-  await JsonlReader.streamMessages(transcriptPath, (msg) => {
-    const usage = msg.usage || msg.message?.usage;
+  try {
+    // Try to find the last message with usage by scanning recent lines
+    const recentLines = await ReverseFileReader.readLastLines({ 
+      filePath: transcriptPath, 
+      maxLines: 20 // Look at last 20 lines to find usage data
+    });
     
-    if (usage) {
-      const messageTotal = (usage.input_tokens || 0) + 
-                          (usage.output_tokens || 0) + 
-                          (usage.cache_read_input_tokens || 0) + 
-                          (usage.cache_creation_input_tokens || 0);
-      
-      if (messageTotal === total) {
-        lastMessageWithUsage = usage as TokenUsage;
+    for (const line of recentLines) {
+      try {
+        const msg = JSON.parse(line);
+        const usage = msg.usage || msg.message?.usage;
+        
+        if (usage) {
+          const messageTotal = (usage.input_tokens || 0) + 
+                              (usage.output_tokens || 0) + 
+                              (usage.cache_read_input_tokens || 0) + 
+                              (usage.cache_creation_input_tokens || 0);
+          
+          if (messageTotal === total) {
+            lastMessageWithUsage = usage as TokenUsage;
+            break; // Found it, stop scanning
+          }
+        }
+      } catch {
+        continue; // Skip malformed lines
       }
     }
-    
-    return null; // We don't need to collect results, just track lastMessageWithUsage
-  });
+  } catch (reverseError) {
+    // Fallback to streaming if reverse reading fails
+    await JsonlReader.streamMessages(transcriptPath, (msg) => {
+      const usage = msg.usage || msg.message?.usage;
+      
+      if (usage) {
+        const messageTotal = (usage.input_tokens || 0) + 
+                            (usage.output_tokens || 0) + 
+                            (usage.cache_read_input_tokens || 0) + 
+                            (usage.cache_creation_input_tokens || 0);
+        
+        if (messageTotal === total) {
+          lastMessageWithUsage = usage as TokenUsage;
+        }
+      }
+      
+      return null;
+    });
+  }
 
   const status = calculateTokenStatus(total);
 

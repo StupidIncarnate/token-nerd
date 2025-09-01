@@ -9,7 +9,6 @@ import { launchTUI } from '../lib/tui-components';
 import { findSessionJsonl } from '../lib/jsonl-utils';
 import * as path from 'path';
 import * as os from 'os';
-import * as fs from 'fs';
 
 // Import version from package.json
 const packageJson = require('../../package.json');

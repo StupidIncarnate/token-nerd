@@ -22,7 +22,7 @@ jest.mock('../config', () => {
   const originalModule = jest.requireActual('../config');
   return {
     ...originalModule,
-    getTokenLimit: jest.fn(() => 200000), // Use 200k for test consistency
+    getTokenLimitSync: jest.fn(() => 200000), // Use 200k for test consistency
   };
 });
 
@@ -244,6 +244,103 @@ describe('token-calculator', () => {
       const result = await getCurrentTokenCount('/test/session.jsonl');
 
       expect(result).toBe(200); // Last message: 50 + 25 + 75 + 50
+    });
+
+    describe('optimization behavior', () => {
+      it('should use caching to avoid redundant file reads', async () => {
+        mockedFs.existsSync.mockReturnValue(true);
+        
+        const messages = [
+          {usage: {input_tokens: 100, output_tokens: 50}}
+        ];
+
+        mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+          messages.forEach((msg, index) => processor(msg as any, index + 1));
+          return [];
+        });
+
+        // First call
+        const result1 = await getCurrentTokenCount('/test/session.jsonl');
+        
+        // Second call - should use cache if file hasn't changed
+        const result2 = await getCurrentTokenCount('/test/session.jsonl');
+
+        expect(result1).toBe(150);
+        expect(result2).toBe(150);
+        
+        // Verify that the fallback streaming was called at least once
+        expect(mockedJsonlReader.streamMessages).toHaveBeenCalled();
+      });
+
+      it('should handle fallback to streaming when reverse reading fails', async () => {
+        // Mock ReverseFileReader to fail (this tests the fallback mechanism)
+        const mockReverseReader = require('./reverse-reader');
+        jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLine').mockRejectedValue(new Error('Read failed'));
+        
+        mockedFs.existsSync.mockReturnValue(true);
+        
+        const messages = [
+          {usage: {input_tokens: 75, output_tokens: 25}}
+        ];
+
+        mockedJsonlReader.streamMessages.mockImplementation(async (path, processor) => {
+          messages.forEach((msg, index) => processor(msg as any, index + 1));
+          return [];
+        });
+
+        const result = await getCurrentTokenCount('/test/session.jsonl');
+
+        expect(result).toBe(100); // Should fall back to streaming
+        expect(mockedJsonlReader.streamMessages).toHaveBeenCalled();
+        
+        mockReverseReader.ReverseFileReader.readLastLine.mockRestore();
+      });
+
+      it('should fall back to file size estimate when all parsing fails', async () => {
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.statSync.mockReturnValue({ size: 5000 } as any);
+        
+        // Mock both reverse reading and streaming to fail
+        const mockReverseReader = require('./reverse-reader');
+        jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLine').mockRejectedValue(new Error('Read failed'));
+        
+        mockedJsonlReader.streamMessages.mockRejectedValue(new Error('Stream failed'));
+
+        const result = await getCurrentTokenCount('/test/session.jsonl');
+
+        expect(result).toBe(50); // File size / 100: 5000 / 100 = 50
+        
+        mockReverseReader.ReverseFileReader.readLastLine.mockRestore();
+      });
+
+      it('should return 0 when file does not exist', async () => {
+        mockedFs.existsSync.mockReturnValue(false);
+
+        const result = await getCurrentTokenCount('/nonexistent/file.jsonl');
+
+        expect(result).toBe(0);
+        expect(mockedJsonlReader.streamMessages).not.toHaveBeenCalled();
+      });
+
+      it('should handle corrupt JSONL gracefully', async () => {
+        mockedFs.existsSync.mockReturnValue(true);
+        mockedFs.statSync.mockReturnValue({ size: 1000 } as any);
+        
+        // Mock reverse reader to return invalid JSON
+        const mockReverseReader = require('./reverse-reader');
+        jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLine').mockResolvedValue('invalid json}');
+        jest.spyOn(mockReverseReader.ReverseFileReader, 'readLastLines').mockResolvedValue(['invalid json}', 'more invalid']);
+        
+        // Mock streaming to also fail
+        mockedJsonlReader.streamMessages.mockRejectedValue(new Error('Stream failed'));
+
+        const result = await getCurrentTokenCount('/test/corrupted.jsonl');
+
+        expect(result).toBe(10); // Should fall back to file size estimate: 1000 / 100
+        
+        mockReverseReader.ReverseFileReader.readLastLine.mockRestore();
+        mockReverseReader.ReverseFileReader.readLastLines.mockRestore();
+      });
     });
   });
 

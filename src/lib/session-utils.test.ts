@@ -1,4 +1,4 @@
-import { discoverAllSessions, extractProjectName, isSessionActive, getAssistantMessageCount } from './session-utils';
+import { discoverAllSessions, extractProjectName, isSessionActive, getAssistantMessageCountSync } from './session-utils';
 import type { Session } from '../types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -188,7 +188,7 @@ describe('session-utils', () => {
     });
   });
 
-  describe('getAssistantMessageCount', () => {
+  describe('getAssistantMessageCountSync', () => {
     it('should count messages with usage data', () => {
       const sessionId = 'test-session';
       const jsonlPath = '/mock/project/session.jsonl';
@@ -202,7 +202,7 @@ describe('session-utils', () => {
         { id: 'msg-5', usage: { input_tokens: 0 } }
       ]);
 
-      const result = getAssistantMessageCount({ sessionId });
+      const result = getAssistantMessageCountSync({ sessionId });
 
       expect(result).toBe(4); // msg-1, msg-2, msg-3, and msg-5
       expect(mockFindJsonlPath).toHaveBeenCalledWith(sessionId);
@@ -211,7 +211,7 @@ describe('session-utils', () => {
     it('should return 0 when no JSONL file found', () => {
       mockFindJsonlPath.mockReturnValue(null);
 
-      const result = getAssistantMessageCount({ sessionId: 'nonexistent-session' });
+      const result = getAssistantMessageCountSync({ sessionId: 'nonexistent-session' });
 
       expect(result).toBe(0);
     });
@@ -226,7 +226,7 @@ describe('session-utils', () => {
         { id: 'msg-2', timestamp: '2024-01-01T10:00:00Z' }
       ]);
 
-      const result = getAssistantMessageCount({ sessionId });
+      const result = getAssistantMessageCountSync({ sessionId });
 
       expect(result).toBe(0);
     });
@@ -245,7 +245,7 @@ describe('session-utils', () => {
         { id: 'msg-6' }
       ]);
 
-      const result = getAssistantMessageCount({ sessionId });
+      const result = getAssistantMessageCountSync({ sessionId });
 
       expect(result).toBe(4); // Messages with defined usage fields
     });

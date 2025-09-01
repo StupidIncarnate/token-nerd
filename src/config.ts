@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getClaudeConfigFile } from './lib/claude-path-resolver';
+import { FileCache } from './lib/file-cache';
 
 // Token limits based on Claude's autoCompactEnabled setting
 export const TOKEN_LIMITS = {
@@ -46,14 +47,52 @@ export const ANSI_COLORS = {
   RESET: '\x1b[0m',               // Reset to default color
 } as const;
 
+// Cache for Claude configuration to avoid redundant file reads
+const configCache = new FileCache<boolean>();
+
 // Configuration utility functions
 
 /**
  * Read Claude configuration and determine if auto-compact is enabled
  * Returns true if autoCompactEnabled is true or not present (default behavior)
  * Returns false if explicitly set to false
+ * OPTIMIZED: Uses caching to avoid redundant config file reads
  */
-export function isAutoCompactEnabled(): boolean {
+export async function isAutoCompactEnabled(): Promise<boolean> {
+  const configPath = getClaudeConfigFile();
+  
+  if (!fs.existsSync(configPath)) {
+    return true; // Default to auto-compact enabled if no config file
+  }
+
+  try {
+    return await configCache.get({
+      key: 'auto-compact-enabled',
+      filePath: configPath,
+      computeFn: () => {
+        try {
+          const configContent = fs.readFileSync(configPath, 'utf-8');
+          const config = JSON.parse(configContent);
+          
+          // Default to true if autoCompactEnabled is not specified
+          return config.autoCompactEnabled !== false;
+        } catch (error) {
+          // If there's any error parsing the config, default to auto-compact enabled
+          return true;
+        }
+      }
+    });
+  } catch (error) {
+    // If there's any error with caching, default to auto-compact enabled
+    return true;
+  }
+}
+
+/**
+ * Synchronous version for backward compatibility
+ * @deprecated Use isAutoCompactEnabled() for better performance
+ */
+export function isAutoCompactEnabledSync(): boolean {
   try {
     const configPath = getClaudeConfigFile();
     if (!fs.existsSync(configPath)) {
@@ -74,7 +113,17 @@ export function isAutoCompactEnabled(): boolean {
 /**
  * Get the appropriate token limit based on Claude's configuration
  * Checks autoCompactEnabled setting and returns corresponding limit
+ * OPTIMIZED: Uses cached config reading for better performance
  */
-export function getTokenLimit(): number {
-  return isAutoCompactEnabled() ? TOKEN_LIMITS.AUTO_COMPACT : TOKEN_LIMITS.NO_AUTO_COMPACT;
+export async function getTokenLimit(): Promise<number> {
+  const autoCompactEnabled = await isAutoCompactEnabled();
+  return autoCompactEnabled ? TOKEN_LIMITS.AUTO_COMPACT : TOKEN_LIMITS.NO_AUTO_COMPACT;
+}
+
+/**
+ * Synchronous version for backward compatibility
+ * @deprecated Use getTokenLimit() for better performance
+ */
+export function getTokenLimitSync(): number {
+  return isAutoCompactEnabledSync() ? TOKEN_LIMITS.AUTO_COMPACT : TOKEN_LIMITS.NO_AUTO_COMPACT;
 }
