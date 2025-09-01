@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
+import { getClaudeProjectsDir } from './claude-path-resolver';
 
 /**
  * Sanitizes session ID to prevent shell injection attacks
@@ -17,7 +18,7 @@ export function sanitizeSessionId({ sessionId }: { sessionId: string }): string 
  */
 export async function findSessionJsonl({ sessionId }: { sessionId: string }): Promise<string | undefined> {
   const sanitizedId = sanitizeSessionId({ sessionId });
-  const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+  const projectsDir = getClaudeProjectsDir();
   const targetFileName = `${sanitizedId}.jsonl`;
   
   try {
@@ -163,7 +164,7 @@ export function parseJsonl(filePath: string): JsonlMessage[] {
 export function findJsonlPath(sessionId: string): string | null {
   try {
     const sanitizedId = sanitizeSessionId({ sessionId });
-    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+    const projectsDir = getClaudeProjectsDir();
     if (!fs.existsSync(projectsDir)) {
       return null;
     }
@@ -195,7 +196,7 @@ export function findJsonlPath(sessionId: string): string | null {
  */
 
 export function scanClaudeProjects(): JsonlFileInfo[] {
-  const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+  const projectsDir = getClaudeProjectsDir();
   
   if (!fs.existsSync(projectsDir)) {
     return [];

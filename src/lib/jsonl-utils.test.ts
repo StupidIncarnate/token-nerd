@@ -26,6 +26,12 @@ jest.mock('os', () => ({
   homedir: mockHomedir
 }));
 
+// Mock claude-path-resolver
+jest.mock('./claude-path-resolver', () => ({
+  getClaudeProjectsDir: jest.fn(() => '/mock/home/.claude/projects'),
+  resetPathCache: jest.fn()
+}));
+
 const mockedFs = jest.mocked(fs);
 const mockedReadline = jest.mocked(readline);
 

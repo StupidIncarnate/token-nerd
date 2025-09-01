@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as os from 'os';
+import { getClaudeConfigFile, getClaudeSettingsFile } from '../lib/claude-path-resolver';
 
 /**
  * Expand tilde (~) to home directory in file paths
@@ -22,16 +23,18 @@ export function getClaudeDir(): string {
 
 /**
  * Get the Claude configuration file path (.claude.json in home directory)
+ * @deprecated Use getClaudeConfigFile from claude-path-resolver for auto-detection
  */
 export function getClaudeConfigPath(): string {
-  return path.join(os.homedir(), '.claude.json');
+  return getClaudeConfigFile();
 }
 
 /**
  * Get the Claude settings file path
+ * @deprecated Use getClaudeSettingsFile from claude-path-resolver for auto-detection  
  */
 export function getClaudeSettingsPath(): string {
-  return path.join(getClaudeDir(), 'settings.json');
+  return getClaudeSettingsFile();
 }
 
 /**

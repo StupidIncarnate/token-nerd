@@ -8,6 +8,17 @@ import {
   getClaudeHooksDir
 } from './utils';
 
+// Mock claude-path-resolver 
+jest.mock('../lib/claude-path-resolver', () => ({
+  getClaudeConfigFile: jest.fn(),
+  getClaudeSettingsFile: jest.fn(),  
+  resetPathCache: jest.fn()
+}));
+
+import { getClaudeConfigFile, getClaudeSettingsFile } from '../lib/claude-path-resolver';
+const mockGetClaudeConfigFile = jest.mocked(getClaudeConfigFile);
+const mockGetClaudeSettingsFile = jest.mocked(getClaudeSettingsFile);
+
 describe('utils.ts', () => {
   const originalPlatform = process.platform;
   const testHomedir = os.homedir();
@@ -126,11 +137,17 @@ describe('utils.ts', () => {
 
   describe('getClaudeConfigPath', () => {
     it('should return .claude.json in home directory', () => {
+      // Mock the path resolver to return expected path
+      mockGetClaudeConfigFile.mockReturnValue(path.join(testHomedir, '.claude.json'));
+      
       const result = getClaudeConfigPath();
       expect(result).toBe(path.join(testHomedir, '.claude.json'));
     });
 
     it('should use os.homedir() internally', () => {
+      // Mock the path resolver to return expected path
+      mockGetClaudeConfigFile.mockReturnValue(path.join(testHomedir, '.claude.json'));
+      
       const result = getClaudeConfigPath();
       expect(result).toContain(testHomedir);
       expect(result.endsWith('.claude.json')).toBe(true);
@@ -144,6 +161,9 @@ describe('utils.ts', () => {
         writable: true
       });
 
+      // Mock the path resolver to return Unix-style paths
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, '.claude', 'settings.json'));
+
       const result = getClaudeSettingsPath();
       expect(result).toBe(path.join(testHomedir, '.claude', 'settings.json'));
     });
@@ -154,6 +174,9 @@ describe('utils.ts', () => {
         writable: true
       });
 
+      // Mock the path resolver to return Windows-style paths
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, 'AppData', 'Roaming', 'claude', 'settings.json'));
+
       const result = getClaudeSettingsPath();
       expect(result).toBe(path.join(testHomedir, 'AppData', 'Roaming', 'claude', 'settings.json'));
     });
@@ -163,6 +186,9 @@ describe('utils.ts', () => {
         value: 'darwin',
         writable: true
       });
+
+      // Mock the path resolver to return Darwin-style paths
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, '.claude', 'settings.json'));
 
       const result = getClaudeSettingsPath();
       expect(result).toBe(path.join(testHomedir, '.claude', 'settings.json'));
@@ -234,6 +260,9 @@ describe('utils.ts', () => {
         writable: true
       });
 
+      // Mock Windows paths
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, 'AppData', 'Roaming', 'claude', 'settings.json'));
+      
       const winClaudeDir = getClaudeDir();
       const winHooksDir = getClaudeHooksDir();
       const winSettingsPath = getClaudeSettingsPath();
@@ -248,6 +277,9 @@ describe('utils.ts', () => {
         writable: true
       });
 
+      // Mock Unix paths
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, '.claude', 'settings.json'));
+      
       const unixClaudeDir = getClaudeDir();
       const unixHooksDir = getClaudeHooksDir();
       const unixSettingsPath = getClaudeSettingsPath();
@@ -258,6 +290,10 @@ describe('utils.ts', () => {
     });
 
     it('should use consistent path separators', () => {
+      // Mock to return valid paths
+      mockGetClaudeConfigFile.mockReturnValue(path.join(testHomedir, '.claude.json'));
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, '.claude', 'settings.json'));
+      
       const configPath = getClaudeConfigPath();
       const claudeDir = getClaudeDir();
       const hooksDir = getClaudeHooksDir();
@@ -279,6 +315,10 @@ describe('utils.ts', () => {
 
   describe('functionality validation', () => {
     it('should return absolute paths for all functions', () => {
+      // Mock to return valid paths
+      mockGetClaudeConfigFile.mockReturnValue(path.join(testHomedir, '.claude.json'));
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, '.claude', 'settings.json'));
+      
       const paths = [
         getClaudeConfigPath(),
         getClaudeDir(),
@@ -293,6 +333,10 @@ describe('utils.ts', () => {
     });
 
     it('should return different paths for different functions', () => {
+      // Mock to return valid paths
+      mockGetClaudeConfigFile.mockReturnValue(path.join(testHomedir, '.claude.json'));
+      mockGetClaudeSettingsFile.mockReturnValue(path.join(testHomedir, '.claude', 'settings.json'));
+      
       const configPath = getClaudeConfigPath();
       const claudeDir = getClaudeDir();
       const settingsPath = getClaudeSettingsPath();

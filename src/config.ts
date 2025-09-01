@@ -8,6 +8,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { getClaudeConfigFile } from './lib/claude-path-resolver';
 
 // Token limits based on Claude's autoCompactEnabled setting
 export const TOKEN_LIMITS = {
@@ -54,7 +55,7 @@ export const ANSI_COLORS = {
  */
 export function isAutoCompactEnabled(): boolean {
   try {
-    const configPath = path.join(os.homedir(), '.claude.json');
+    const configPath = getClaudeConfigFile();
     if (!fs.existsSync(configPath)) {
       return true; // Default to auto-compact enabled if no config file
     }
