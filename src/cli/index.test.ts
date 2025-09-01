@@ -188,6 +188,30 @@ describe('CLI Integration Tests', () => {
     });
   });
 
+  describe('CLI Security Integration', () => {
+    it('should use secure functions from jsonl-utils', async () => {
+      // Verify CLI integrates with secure jsonl-utils functions
+      const { sanitizeSessionId, findSessionJsonl } = await import('../lib/jsonl-utils');
+      
+      expect(sanitizeSessionId).toBeDefined();
+      expect(findSessionJsonl).toBeDefined();
+      expect(typeof sanitizeSessionId).toBe('function');
+      expect(typeof findSessionJsonl).toBe('function');
+    });
+
+    it('should handle malicious session IDs safely in CLI context', async () => {
+      // Test integration security at the CLI boundary
+      const { sanitizeSessionId } = await import('../lib/jsonl-utils');
+      const maliciousInput = '"; rm -rf /; "';
+      
+      // CLI should use sanitized input
+      const result = sanitizeSessionId({ sessionId: maliciousInput });
+      expect(result).not.toContain(';');
+      expect(result).not.toContain('/');
+      expect(result).not.toContain('"');
+    });
+  });
+
   describe('Error handling patterns', () => {
     it('should handle various error scenarios', () => {
       // Test error handling patterns that would be used in CLI

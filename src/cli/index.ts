@@ -6,8 +6,10 @@ import { formatTokenCount } from '../statusline/config';
 import { selectSession, listSessions } from '../lib/session-tracker';
 import { selectSessionWithTreeView } from '../lib/session-tree-view';
 import { launchTUI } from '../lib/tui-components';
+import { findSessionJsonl } from '../lib/jsonl-utils';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 
 // Import version from package.json
 const packageJson = require('../../package.json');
@@ -26,15 +28,8 @@ async function runSessionBrowser(): Promise<void> {
 
     console.log(`\n🔍 Analyzing session ${selectedSessionId}...`);
     
-    // Find the actual JSONL file path
-    const { execSync } = require('child_process');
-    let actualJsonlPath: string | undefined;
-    try {
-      const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${selectedSessionId}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
-      actualJsonlPath = result.trim() || undefined;
-    } catch (error) {
-      actualJsonlPath = undefined;
-    }
+    // Find the actual JSONL file path safely
+    const actualJsonlPath = await findSessionJsonl({ sessionId: selectedSessionId });
     
     const exitCode = await launchTUI(selectedSessionId, actualJsonlPath);
     if (exitCode === 2) {
@@ -146,15 +141,8 @@ program
     if (options.session) {
       console.log(`🔍 Analyzing session ${options.session}...`);
       
-      // Find the actual JSONL file path
-      const { execSync } = require('child_process');
-      let actualJsonlPath: string | undefined;
-      try {
-        const result = execSync(`find ${path.join(os.homedir(), '.claude', 'projects')} -name "${options.session}.jsonl" -type f 2>/dev/null | head -1`, { encoding: 'utf8' });
-        actualJsonlPath = result.trim() || undefined;
-      } catch (error) {
-        actualJsonlPath = undefined;
-      }
+      // Find the actual JSONL file path safely
+      const actualJsonlPath = await findSessionJsonl({ sessionId: options.session });
       
       // Parse message ID with optional bracket notation
       let messageId: string | undefined;

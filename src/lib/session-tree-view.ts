@@ -1,11 +1,10 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import inquirer from 'inquirer';
-import { getCurrentTokenCount } from './token-calculator';
+import { discoverAllSessions, Session, extractProjectName } from './session-utils';
 
-// Dynamic project name extraction utility
-function extractProjectName(projectDir: string): string {
+// Dynamic project name extraction utility for tree view (enhanced version)
+function extractProjectNameForTreeView(projectDir: string): string {
   const cleanDir = projectDir.replace(/^-/, ''); // Remove leading dash
   const homeDir = os.homedir();
   const homeDirName = path.basename(homeDir);
@@ -21,18 +20,9 @@ function extractProjectName(projectDir: string): string {
   } else if (cleanDir.startsWith(projectsPattern)) {
     return cleanDir.replace(projectsPattern, '');
   } else {
-    // Fallback: take the last segment after splitting by dashes
-    return cleanDir.split('-').pop() || 'unknown';
+    // Fallback: use the basic extraction from session-utils
+    return extractProjectName({ projectDir });
   }
-}
-
-interface Session {
-  id: string;
-  project: string;
-  tokens: number;
-  lastModified: Date;
-  isActive: boolean;
-  path: string;
 }
 
 interface ProjectNode {
@@ -65,63 +55,38 @@ export class SessionTreeView {
   }
 
   private async loadProjects(): Promise<void> {
-    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+    // Use centralized session discovery but group by enhanced project names for tree view
+    const allSessions = await discoverAllSessions();
     
-    if (!fs.existsSync(projectsDir)) {
-      return;
-    }
-
-    const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true })
-      .filter(dirent => dirent.isDirectory())
-      .map(dirent => dirent.name);
-
-    for (const projectDir of projectDirs) {
-      const projectPath = path.join(projectsDir, projectDir);
-      const sessions = await this.loadSessionsForProject(projectPath, projectDir);
+    // Group sessions by project using enhanced extraction
+    const projectGroups = new Map<string, Session[]>();
+    
+    for (const session of allSessions) {
+      // Extract project directory from session path  
+      const projectDir = path.basename(path.dirname(session.path));
+      const enhancedProjectName = extractProjectNameForTreeView(projectDir);
       
+      if (!projectGroups.has(enhancedProjectName)) {
+        projectGroups.set(enhancedProjectName, []);
+      }
+      
+      // Update session with enhanced project name
+      const enhancedSession = { ...session, project: enhancedProjectName };
+      projectGroups.get(enhancedProjectName)!.push(enhancedSession);
+    }
+    
+    // Convert to project nodes
+    for (const [projectName, sessions] of projectGroups) {
       if (sessions.length > 0) {
-        const projectName = extractProjectName(projectDir);
-
         this.projects.set(projectName, {
           name: projectName,
-          path: projectPath,
+          path: path.dirname(sessions[0].path),
           sessions: sessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime()),
           isExpanded: false,
           isCurrentProject: false
         });
       }
     }
-  }
-
-  private async loadSessionsForProject(projectPath: string, projectDir: string): Promise<Session[]> {
-    const sessions: Session[] = [];
-    const files = fs.readdirSync(projectPath)
-      .filter(f => f.endsWith('.jsonl') && !f.endsWith('.save'));
-
-    for (const file of files) {
-      const filePath = path.join(projectPath, file);
-      const stats = fs.statSync(filePath);
-      const sessionId = path.basename(file, '.jsonl');
-      
-      // Check if active (modified in last 5 minutes)
-      const isActive = (Date.now() - stats.mtime.getTime()) < 5 * 60 * 1000;
-      
-      const project = extractProjectName(projectDir);
-      
-      // Get accurate token count from JSONL (same method as statusline)
-      const tokens = await getCurrentTokenCount(filePath);
-      
-      sessions.push({
-        id: sessionId,
-        project,
-        tokens,
-        lastModified: stats.mtime,
-        isActive,
-        path: filePath
-      });
-    }
-
-    return sessions;
   }
 
   private detectCurrentProject(): void {
@@ -160,7 +125,6 @@ export class SessionTreeView {
 
   private buildFlatChoices(): void {
     this.flatChoices = [];
-    let index = 0;
 
     for (const [projectName, projectNode] of this.projects) {
       const prefix = projectNode.isExpanded ? '▼' : '▶';

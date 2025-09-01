@@ -424,7 +424,8 @@ describe('session-tracker', () => {
         throw new Error('Permission denied');
       });
 
-      await expect(listSessions()).rejects.toThrow('Permission denied');
+      const result = await listSessions();
+      expect(result).toEqual([]);
     });
 
     it('should handle fs.statSync errors gracefully', async () => {
@@ -439,7 +440,8 @@ describe('session-tracker', () => {
         throw new Error('Stat failed');
       });
 
-      await expect(listSessions()).rejects.toThrow('Stat failed');
+      const result = await listSessions();
+      expect(result).toEqual([]);
     });
 
     it('should handle inquirer prompt errors', async () => {

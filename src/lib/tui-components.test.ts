@@ -698,5 +698,83 @@ describe('tui-components', () => {
       const timeModeFormat = `+${contextDelta} actual (${generationCost} out)`;
       expect(timeModeFormat).toBe('+1000 actual (50 out)');
     });
+
+    it('should handle conversation sort mode correctly', () => {
+      const bundles: Bundle[] = [
+        {
+          id: 'user-1',
+          timestamp: 1000,
+          operations: [{ 
+            tool: 'User', 
+            params: {}, 
+            response: 'First message', 
+            responseSize: 50, 
+            timestamp: 1000, 
+            session_id: 'test', 
+            tokens: 10, 
+            contextGrowth: 0, 
+            generationCost: 0, 
+            allocation: 'exact' as const, 
+            details: 'user message' 
+          }],
+          totalTokens: 10
+        },
+        {
+          id: 'assistant-1',
+          timestamp: 2000,
+          operations: [{ 
+            tool: 'Assistant', 
+            params: {}, 
+            response: 'First response', 
+            responseSize: 100, 
+            timestamp: 2000, 
+            session_id: 'test', 
+            tokens: 20, 
+            contextGrowth: 0, 
+            generationCost: 20, 
+            allocation: 'exact' as const, 
+            details: 'assistant response' 
+          }],
+          totalTokens: 20
+        },
+        {
+          id: 'user-2',
+          timestamp: 1500, // Earlier timestamp but should come after assistant-1 in conversation flow
+          operations: [{ 
+            tool: 'User', 
+            params: {}, 
+            response: 'Second message', 
+            responseSize: 60, 
+            timestamp: 1500, 
+            session_id: 'test', 
+            tokens: 15, 
+            contextGrowth: 0, 
+            generationCost: 0, 
+            allocation: 'exact' as const, 
+            details: 'user message' 
+          }],
+          totalTokens: 15
+        }
+      ];
+
+      // Simulate TokenAnalyzer's getSortedBundles method for conversation mode
+      const sortedByConversation = [...bundles].sort((a, b) => {
+        // Preserve original bundle order (conversation flow)
+        const aIndex = bundles.findIndex(bundle => bundle.id === a.id);
+        const bIndex = bundles.findIndex(bundle => bundle.id === b.id);
+        return aIndex - bIndex;
+      });
+
+      // Should preserve original order regardless of timestamps
+      expect(sortedByConversation[0].id).toBe('user-1');
+      expect(sortedByConversation[1].id).toBe('assistant-1');
+      expect(sortedByConversation[2].id).toBe('user-2');
+
+      // Contrast with time sorting
+      const sortedByTime = [...bundles].sort((a, b) => a.timestamp - b.timestamp);
+      expect(sortedByTime[0].id).toBe('user-1');
+      expect(sortedByTime[1].id).toBe('user-2'); // Different order due to timestamp
+      expect(sortedByTime[2].id).toBe('assistant-1');
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { parseJsonl, findJsonlPath, getAssistantMessageCount, JsonlReader } from './jsonl-utils';
+import { parseJsonl, findJsonlPath, JsonlReader, sanitizeSessionId, findSessionJsonl, scanClaudeProjects, JsonlFileInfo } from './jsonl-utils';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -10,7 +10,8 @@ jest.mock('fs', () => ({
   readFileSync: jest.fn(),
   existsSync: jest.fn(),
   readdirSync: jest.fn(),
-  createReadStream: jest.fn()
+  createReadStream: jest.fn(),
+  statSync: jest.fn()
 }));
 
 // Mock readline module for JsonlReader.streamMessages
@@ -264,104 +265,6 @@ describe('jsonl-utils', () => {
     });
   });
 
-  describe('getAssistantMessageCount', () => {
-    it('should count messages with usage data', () => {
-      const sessionId = 'test-session';
-      const jsonlPath = '/mock/project/session.jsonl';
-      
-      // Mock findJsonlPath
-      mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readdirSync
-        .mockReturnValueOnce([{ name: 'project', isDirectory: () => true }] as any)
-        .mockReturnValueOnce(['session-test-session.jsonl'] as any);
-      
-      // Mock parseJsonl content
-      const jsonlContent = [
-        '{"id":"msg-1","usage":{"input_tokens":100,"output_tokens":50}}',
-        '{"id":"msg-2","usage":{"cache_creation_input_tokens":200}}',
-        '{"id":"msg-3","message":{"usage":{"cache_read_input_tokens":75}}}',
-        '{"id":"msg-4","no_usage":true}',
-        '{"id":"msg-5","usage":{"input_tokens":0}}'
-      ].join('\n');
-      
-      mockedFs.readFileSync.mockReturnValue(jsonlContent);
-
-      const result = getAssistantMessageCount(sessionId);
-
-      expect(result).toBe(4); // msg-1, msg-2, msg-3, and msg-5 (empty usage still counts)
-    });
-
-    it('should return 0 when no JSONL file found', () => {
-      mockedFs.existsSync.mockReturnValue(false);
-
-      const result = getAssistantMessageCount('nonexistent-session');
-
-      expect(result).toBe(0);
-    });
-
-    it('should return 0 when JSONL file has no messages with usage', () => {
-      const sessionId = 'no-usage-session';
-      
-      mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readdirSync
-        .mockReturnValueOnce([{ name: 'project', isDirectory: () => true }] as any)
-        .mockReturnValueOnce(['session-no-usage-session.jsonl'] as any);
-      
-      const jsonlContent = [
-        '{"id":"msg-1","content":"text only"}',
-        '{"id":"msg-2","timestamp":"2024-01-01T10:00:00Z"}'
-      ].join('\n');
-      
-      mockedFs.readFileSync.mockReturnValue(jsonlContent);
-
-      const result = getAssistantMessageCount(sessionId);
-
-      expect(result).toBe(0);
-    });
-
-    it('should handle parseJsonl errors gracefully', () => {
-      const sessionId = 'error-session';
-      
-      mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readdirSync
-        .mockReturnValueOnce([{ name: 'project', isDirectory: () => true }] as any)
-        .mockReturnValueOnce(['session-error-session.jsonl'] as any);
-      
-      // Mock readFileSync to throw error
-      mockedFs.readFileSync.mockImplementation(() => {
-        throw new Error('File read error');
-      });
-
-      const result = getAssistantMessageCount(sessionId);
-
-      expect(result).toBe(0);
-    });
-
-    it('should count messages with any usage field present', () => {
-      const sessionId = 'mixed-usage';
-      
-      mockedFs.existsSync.mockReturnValue(true);
-      mockedFs.readdirSync
-        .mockReturnValueOnce([{ name: 'project', isDirectory: () => true }] as any)
-        .mockReturnValueOnce(['session-mixed-usage.jsonl'] as any);
-      
-      const jsonlContent = [
-        '{"id":"msg-1","usage":{"input_tokens":100}}',
-        '{"id":"msg-2","usage":{"output_tokens":50}}', 
-        '{"id":"msg-3","usage":{"cache_creation_input_tokens":200}}',
-        '{"id":"msg-4","usage":{"cache_read_input_tokens":75}}',
-        '{"id":"msg-5","usage":{"total_tokens":300}}',
-        '{"id":"msg-6","other_field":"value"}',
-        '{"id":"msg-7"}'
-      ].join('\n');
-      
-      mockedFs.readFileSync.mockReturnValue(jsonlContent);
-
-      const result = getAssistantMessageCount(sessionId);
-
-      expect(result).toBe(4); // All messages with defined usage fields (msg-6 and msg-7 don't have usage)
-    });
-  });
 
   describe('JsonlReader', () => {
     describe('streamMessages', () => {
@@ -627,6 +530,309 @@ describe('jsonl-utils', () => {
         expect(result).toHaveLength(1);
         expect(result[0].id).toBe('msg-1');
         expect(result[0].usage?.input_tokens).toBe(100);
+      });
+    });
+  });
+
+  describe('scanClaudeProjects', () => {
+    it('should scan and return JSONL file information securely', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync
+        .mockReturnValueOnce([
+          { name: 'project1-safe', isDirectory: () => true },
+          { name: 'project2-also-safe', isDirectory: () => true }
+        ] as any)
+        .mockReturnValueOnce(['session1.jsonl', 'session2.jsonl'] as any)
+        .mockReturnValueOnce(['session3.jsonl', 'backup.save'] as any);
+      
+      const mockStats1 = { mtime: new Date('2024-01-01') } as any;
+      const mockStats2 = { mtime: new Date('2024-01-02') } as any;
+      const mockStats3 = { mtime: new Date('2024-01-03') } as any;
+      
+      mockedFs.statSync
+        .mockReturnValueOnce(mockStats1)
+        .mockReturnValueOnce(mockStats2)
+        .mockReturnValueOnce(mockStats3);
+
+      const result = scanClaudeProjects();
+
+      expect(result).toHaveLength(3);
+      expect(result[0]).toEqual({
+        sessionId: 'session1',
+        projectDir: 'project1-safe',
+        filePath: expect.stringContaining('session1.jsonl'),
+        lastModified: mockStats1.mtime
+      });
+      expect(result[1]).toEqual({
+        sessionId: 'session2',
+        projectDir: 'project1-safe',
+        filePath: expect.stringContaining('session2.jsonl'),
+        lastModified: mockStats2.mtime
+      });
+      expect(result[2]).toEqual({
+        sessionId: 'session3',
+        projectDir: 'project2-also-safe',
+        filePath: expect.stringContaining('session3.jsonl'),
+        lastModified: mockStats3.mtime
+      });
+    });
+
+    it('should return empty array when projects directory does not exist', () => {
+      mockedFs.existsSync.mockReturnValue(false);
+
+      const result = scanClaudeProjects();
+
+      expect(result).toEqual([]);
+      expect(mockedFs.readdirSync).not.toHaveBeenCalled();
+    });
+
+    it('should handle top-level directory read errors gracefully', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync.mockImplementation(() => {
+        throw new Error('Permission denied');
+      });
+
+      const result = scanClaudeProjects();
+
+      expect(result).toEqual([]);
+    });
+
+    it('should skip projects with read errors and continue with others', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync
+        .mockReturnValueOnce([
+          { name: 'project-accessible', isDirectory: () => true },
+          { name: 'project-restricted', isDirectory: () => true }
+        ] as any)
+        .mockReturnValueOnce(['session1.jsonl'] as any)
+        .mockImplementationOnce(() => {
+          throw new Error('Permission denied');
+        });
+      
+      const mockStats = { mtime: new Date() } as any;
+      mockedFs.statSync.mockReturnValue(mockStats);
+
+      const result = scanClaudeProjects();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].sessionId).toBe('session1');
+      expect(result[0].projectDir).toBe('project-accessible');
+    });
+
+    it('should filter out .save files automatically', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync
+        .mockReturnValueOnce([
+          { name: 'test-project', isDirectory: () => true }
+        ] as any)
+        .mockReturnValueOnce([
+          'session.jsonl',
+          'backup.save',
+          'session.jsonl.save',
+          'other.txt',
+          'another.jsonl'
+        ] as any);
+      
+      const mockStats = { mtime: new Date() } as any;
+      mockedFs.statSync.mockReturnValue(mockStats);
+
+      const result = scanClaudeProjects();
+
+      expect(result).toHaveLength(2);
+      expect(result.map(r => r.sessionId)).toEqual(['session', 'another']);
+    });
+
+    it('should skip non-directory entries in projects folder', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync
+        .mockReturnValueOnce([
+          { name: 'actual-project', isDirectory: () => true },
+          { name: 'some-file.txt', isDirectory: () => false },
+          { name: 'another-project', isDirectory: () => true }
+        ] as any)
+        .mockReturnValueOnce(['session1.jsonl'] as any)
+        .mockReturnValueOnce(['session2.jsonl'] as any);
+      
+      const mockStats = { mtime: new Date() } as any;
+      mockedFs.statSync.mockReturnValue(mockStats);
+
+      const result = scanClaudeProjects();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].projectDir).toBe('actual-project');
+      expect(result[1].projectDir).toBe('another-project');
+    });
+
+    it('should sanitize session IDs from filenames', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync
+        .mockReturnValueOnce([
+          { name: 'test-project', isDirectory: () => true }
+        ] as any)
+        .mockReturnValueOnce(['session$(malicious).jsonl', 'normal-session.jsonl'] as any);
+      
+      const mockStats = { mtime: new Date() } as any;
+      mockedFs.statSync.mockReturnValue(mockStats);
+
+      const result = scanClaudeProjects();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].sessionId).toBe('sessionmalicious'); // Sanitized
+      expect(result[1].sessionId).toBe('normal-session'); // Unchanged
+    });
+
+    it('should skip directories with suspicious names (security)', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync
+        .mockReturnValueOnce([
+          { name: 'legitimate-project', isDirectory: () => true },
+          { name: '../../../etc', isDirectory: () => true },
+          { name: 'project$(malicious)', isDirectory: () => true },
+          { name: 'good_project-123', isDirectory: () => true }
+        ] as any)
+        .mockReturnValueOnce(['session1.jsonl'] as any)  // legitimate-project
+        .mockReturnValueOnce(['session2.jsonl'] as any); // good_project-123
+      
+      const mockStats = { mtime: new Date() } as any;
+      mockedFs.statSync.mockReturnValue(mockStats);
+
+      const result = scanClaudeProjects();
+
+      // Should only get files from legitimate directories
+      expect(result).toHaveLength(2);
+      expect(result[0].projectDir).toBe('legitimate-project');
+      expect(result[1].projectDir).toBe('good_project-123');
+      
+      // Should have skipped the suspicious directories completely
+      expect(mockedFs.readdirSync).toHaveBeenCalledTimes(3); // Main dir + 2 safe subdirs
+    });
+
+    it('should construct secure file paths', () => {
+      mockedFs.existsSync.mockReturnValue(true);
+      mockedFs.readdirSync
+        .mockReturnValueOnce([
+          { name: 'test-project', isDirectory: () => true }
+        ] as any)
+        .mockReturnValueOnce(['session.jsonl'] as any);
+      
+      const mockStats = { mtime: new Date() } as any;
+      mockedFs.statSync.mockReturnValue(mockStats);
+
+      const result = scanClaudeProjects();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].filePath).toMatch(/\.claude\/projects\/test-project\/session\.jsonl$/);
+      expect(result[0].filePath).not.toContain('..');
+      expect(result[0].filePath).not.toContain('//');
+    });
+  });
+
+  describe('Security Functions', () => {
+    describe('sanitizeSessionId', () => {
+      it('should sanitize session IDs to prevent shell injection', () => {
+        // Test legitimate session IDs pass through unchanged
+        expect(sanitizeSessionId({ sessionId: 'valid-session-123' })).toBe('valid-session-123');
+        expect(sanitizeSessionId({ sessionId: 'test_session' })).toBe('test_session');
+        expect(sanitizeSessionId({ sessionId: 'abc123XYZ' })).toBe('abc123XYZ');
+        
+        // Test malicious inputs are sanitized
+        expect(sanitizeSessionId({ sessionId: '"; rm -rf /; "' })).toBe('rm-rf');
+        expect(sanitizeSessionId({ sessionId: 'test$(whoami)' })).toBe('testwhoami');
+        expect(sanitizeSessionId({ sessionId: 'session; cat /etc/passwd' })).toBe('sessioncatetcpasswd');
+        expect(sanitizeSessionId({ sessionId: 'test`id`' })).toBe('testid');
+        expect(sanitizeSessionId({ sessionId: 'test|ls' })).toBe('testls');
+        expect(sanitizeSessionId({ sessionId: 'test&echo hi' })).toBe('testechohi');
+        expect(sanitizeSessionId({ sessionId: 'test>file' })).toBe('testfile');
+        expect(sanitizeSessionId({ sessionId: 'test<input' })).toBe('testinput');
+        expect(sanitizeSessionId({ sessionId: 'test\\nrm' })).toBe('testnrm');
+      });
+
+      it('should handle edge cases in session ID sanitization', () => {
+        // Empty and whitespace
+        expect(sanitizeSessionId({ sessionId: '' })).toBe('');
+        expect(sanitizeSessionId({ sessionId: '   ' })).toBe('');
+        expect(sanitizeSessionId({ sessionId: '\t\n' })).toBe('');
+        
+        // Special characters
+        expect(sanitizeSessionId({ sessionId: '!!!@@@###' })).toBe('');
+        expect(sanitizeSessionId({ sessionId: 'test@example.com' })).toBe('testexamplecom');
+        expect(sanitizeSessionId({ sessionId: 'test.with.dots' })).toBe('testwithdots');
+        expect(sanitizeSessionId({ sessionId: 'test with spaces' })).toBe('testwithspaces');
+      });
+
+      it('should only allow alphanumeric, underscore, and hyphen characters', () => {
+        const allowedChars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-';
+        expect(sanitizeSessionId({ sessionId: allowedChars })).toBe(allowedChars);
+        
+        const disallowedChars = '!@#$%^&*()+=[]{}|\\:";\'<>?,./~`';
+        expect(sanitizeSessionId({ sessionId: disallowedChars })).toBe('');
+      });
+    });
+
+    describe('findSessionJsonl', () => {
+      it('should sanitize session ID before searching (unit test)', () => {
+        // Test the core sanitization logic that findSessionJsonl uses
+        const maliciousId = 'test"; rm -rf /; echo "session';
+        const sanitized = sanitizeSessionId({ sessionId: maliciousId });
+        
+        expect(sanitized).toBe('testrm-rfechosession');
+        expect(sanitized).not.toContain(';');
+        expect(sanitized).not.toContain('"');
+        expect(sanitized).not.toContain('/');
+        expect(sanitized).not.toContain(' ');
+      });
+
+      it('should construct safe file paths', () => {
+        const sessionId = 'test-session';
+        const sanitizedId = sanitizeSessionId({ sessionId });
+        const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+        const targetFileName = `${sanitizedId}.jsonl`;
+        
+        expect(sanitizedId).toBe('test-session');
+        expect(targetFileName).toBe('test-session.jsonl');
+        expect(projectsDir).toContain('.claude/projects');
+      });
+
+      it('should validate path traversal attacks are prevented', () => {
+        const attackInputs = [
+          '../../../etc/passwd',
+          'test$(cat /etc/passwd)',
+          'test`whoami`',
+          'test|ls -la',
+          'test&echo malicious',
+          'test>output.txt',
+          'test<input.txt'
+        ];
+        
+        attackInputs.forEach(input => {
+          const sanitized = sanitizeSessionId({ sessionId: input });
+          expect(sanitized).not.toContain('/');
+          expect(sanitized).not.toContain('.');
+          expect(sanitized).not.toContain('`');
+          expect(sanitized).not.toContain('$');
+          expect(sanitized).not.toContain(';');
+          expect(sanitized).not.toContain('|');
+          expect(sanitized).not.toContain('&');
+          expect(sanitized).not.toContain('>');
+          expect(sanitized).not.toContain('<');
+        });
+      });
+
+      it('should handle various shell injection patterns', () => {
+        const shellInjectionPatterns = [
+          { input: '; rm -rf /', expected: 'rm-rf' },
+          { input: '`whoami`', expected: 'whoami' },
+          { input: '$(id)', expected: 'id' },
+          { input: '|| cat /etc/passwd', expected: 'catetcpasswd' },
+          { input: '&& echo attack', expected: 'echoattack' },
+          { input: '> /tmp/malicious', expected: 'tmpmalicious' },
+          { input: '< /etc/hosts', expected: 'etchosts' }
+        ];
+        
+        shellInjectionPatterns.forEach(({ input, expected }) => {
+          const result = sanitizeSessionId({ sessionId: input });
+          expect(result).toBe(expected);
+        });
       });
     });
   });

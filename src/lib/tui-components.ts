@@ -5,7 +5,7 @@ import { GenericListView, ListItem, ListView, ListActions } from './generic-list
 import * as readline from 'readline';
 import { TIME_CONSTANTS } from '../config';
 
-type SortMode = 'time' | 'tokens' | 'operation';
+type SortMode = 'time' | 'tokens' | 'operation' | 'conversation';
 
 interface TerminalState {
   bundles: Bundle[];
@@ -44,7 +44,7 @@ class TokenAnalyzer {
     this.sessionId = sessionId;
     this.state = {
       bundles: [],
-      sortMode: 'time',
+      sortMode: 'conversation',
       sortAscending: true,
       selectedIndex: 0,
       expanded: new Set(),
@@ -115,11 +115,24 @@ class TokenAnalyzer {
           break;
         case 'time':
           result = a.timestamp - b.timestamp;
+          // When timestamps are equal, preserve conversation flow order
+          // by using the original bundle order from correlation engine
+          if (result === 0) {
+            const aIndex = this.state.bundles.findIndex(b => b.id === a.id);
+            const bIndex = this.state.bundles.findIndex(bundle => bundle.id === b.id);
+            result = aIndex - bIndex;
+          }
           break;
         case 'operation':
           const aOpTool = a.operations[0]?.tool || '';
           const bOpTool = b.operations[0]?.tool || '';
           result = aOpTool.localeCompare(bOpTool);
+          break;
+        case 'conversation':
+          // Preserve the order from the correlation engine (conversation flow)
+          const aOriginalIndex = this.state.bundles.findIndex(bundle => bundle.id === a.id);
+          const bOriginalIndex = this.state.bundles.findIndex(bundle => bundle.id === b.id);
+          result = aOriginalIndex - bOriginalIndex;
           break;
         default:
           return 0;

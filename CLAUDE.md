@@ -22,7 +22,7 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 - **Maximum 50 lines per function**: Break larger functions into focused helpers
 - **Descriptive names**: Function names should clearly state their purpose
 - **Pure functions when possible**: Avoid side effects, return values explicitly
-- **Object parameters**: Use object destructuring for functions with 3+ parameters or when it improves clarity
+- **Object parameters**: All function parameters must use object destructuring with inline types: `someFn({ someProp }: { someProp: string }): [returnTypes]`
 
 ### File Organization Rules
 - **One primary concern per file**: Don't mix unrelated functionality
@@ -60,7 +60,6 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 - **Silent failures**: Always log or handle errors explicitly
 - **Tight coupling**: Functions should not depend on global state
 - **Mixed concerns**: Don't mix business logic with I/O operations
-- **Long parameter lists**: All function parameters must use object destructuring with typed interfaces
 
 ### Data Sources
 - **JSONL transcripts** in `~/.claude/projects/` contain token usage

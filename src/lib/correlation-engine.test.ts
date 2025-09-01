@@ -39,6 +39,115 @@ describe('correlation-engine', () => {
 
   describe('correlateOperations', () => {
 
+    it('should preserve JSONL file order when timestamps are identical', async () => {
+      const sessionId = 'test-session';
+      const jsonlPath = '/test/session.jsonl';
+      
+      // Mock JSONL with proper parent-child relationships like real data
+      const sameTimestamp = 1693747994247;
+      mockedParseJsonl.mockReturnValue([
+        {
+          id: 'user-1',
+          timestamp: sameTimestamp - 1000,
+          content: { 
+            type: 'user', 
+            uuid: 'user-1',
+            parentUuid: null, // Root message
+            message: { role: 'user', content: [{ type: 'text', text: 'how do I disable auto compacting' }] } 
+          },
+          usage: null
+        },
+        {
+          id: 'assistant-1', 
+          timestamp: sameTimestamp,
+          content: { 
+            type: 'assistant', 
+            uuid: 'assistant-1-uuid',
+            parentUuid: 'user-1', // Responds to user-1
+            message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'Git auto compacting response' }] } 
+          },
+          usage: { input_tokens: 10, output_tokens: 20 }
+        },
+        {
+          id: 'user-2',
+          timestamp: sameTimestamp - 500,
+          content: { 
+            type: 'user', 
+            uuid: 'user-2',
+            parentUuid: 'assistant-1-uuid', // Responds to assistant-1
+            message: { role: 'user', content: [{ type: 'text', text: 'im talking about auto compacting for you, claude' }] } 
+          },
+          usage: null
+        },
+        {
+          id: 'assistant-2',
+          timestamp: sameTimestamp,
+          content: { 
+            type: 'assistant', 
+            uuid: 'assistant-2-uuid',
+            parentUuid: 'user-2', // Responds to user-2
+            message: { id: 'assistant-2', role: 'assistant', content: [{ type: 'text', text: 'Claude auto compacting response' }] } 
+          },
+          usage: { input_tokens: 15, output_tokens: 25 }
+        }
+      ]);
+
+      const bundles = await correlateOperations(sessionId, jsonlPath);
+
+      // The fix works by preserving JSONL order when timestamps are equal
+      // Even though JavaScript's sort algorithm might not compare assistant-1 vs assistant-2 directly,
+      // the JSONL order preservation ensures the overall conversation flow is maintained
+
+      // Should preserve JSONL file order despite corrupted timestamps
+      expect(bundles).toHaveLength(4);
+      expect(bundles[0].id).toBe('user-1');
+      expect(bundles[1].id).toBe('assistant-1'); 
+      expect(bundles[2].id).toBe('user-2');
+      expect(bundles[3].id).toBe('assistant-2'); // This should come after user-2 due to JSONL order
+    });
+
+    it('should handle normal timestamp ordering when timestamps are different', async () => {
+      const sessionId = 'test-session';
+      const jsonlPath = '/test/session.jsonl';
+      
+      // Mock JSONL with proper chronological timestamps
+      mockedParseJsonl.mockReturnValue([
+        {
+          id: 'user-1',
+          timestamp: 1000,
+          content: { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'first message' }] } },
+          usage: null
+        },
+        {
+          id: 'assistant-1', 
+          timestamp: 2000,
+          content: { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'first response' }] } },
+          usage: { input_tokens: 10, output_tokens: 20 }
+        },
+        {
+          id: 'user-2',
+          timestamp: 3000,
+          content: { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'second message' }] } },
+          usage: null
+        },
+        {
+          id: 'assistant-2',
+          timestamp: 4000,
+          content: { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'second response' }] } },
+          usage: { input_tokens: 15, output_tokens: 25 }
+        }
+      ]);
+
+      const bundles = await correlateOperations(sessionId, jsonlPath);
+
+      // Should maintain chronological order
+      expect(bundles).toHaveLength(4);
+      expect(bundles[0].id).toBe('user-1');
+      expect(bundles[1].id).toBe('assistant-1'); 
+      expect(bundles[2].id).toBe('user-2');
+      expect(bundles[3].id).toBe('assistant-2');
+    });
+
     it('should correlate sub-agent operations with Task operations via content matching', async () => {
       const sessionId = 'test-session';
       const jsonlPath = '/test/session.jsonl';
