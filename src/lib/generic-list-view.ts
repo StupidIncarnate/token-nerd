@@ -128,6 +128,7 @@ export class GenericListView {
   private renderControls(): void {
     console.log('\n' + '─'.repeat(80));
     console.log('Controls: [↑↓] navigate | [Enter] select | [Tab] expand | [ESC] back | [q]uit');
+    console.log('Sort: [c] conversation | [t] tokens | [o] operation');
   }
 
   handleKey(key: string): void {
