@@ -60,7 +60,7 @@ Claude Code's statusline shows inaccurate estimates. Users need to see:
 - **Silent failures**: Always log or handle errors explicitly
 - **Tight coupling**: Functions should not depend on global state
 - **Mixed concerns**: Don't mix business logic with I/O operations
-- **Long parameter lists**: Functions with 3+ parameters must use object destructuring with typed interfaces
+- **Long parameter lists**: All function parameters must use object destructuring with typed interfaces
 
 ### Data Sources
 - **JSONL transcripts** in `~/.claude/projects/` contain token usage
