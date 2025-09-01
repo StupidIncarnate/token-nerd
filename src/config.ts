@@ -29,13 +29,20 @@ export const CALCULATION_CONSTANTS = {
 
 // Alert thresholds (percentages)
 export const ALERT_THRESHOLDS = {
-  DANGER_PERCENT: 85,             // Red alert at 85%
-  WARNING_PERCENT: 70,            // Yellow warning at 70%
+  DANGER_PERCENT: 90,             // Red alert at 90%
+  WARNING_PERCENT: 75,            // Yellow warning at 75%
 } as const;
 
 // UI and monitoring constants
 export const UI_CONSTANTS = {
   MONITOR_INTERVAL_MS: 2000,      // Check every 2 seconds
+} as const;
+
+// ANSI color codes for statusline styling
+export const ANSI_COLORS = {
+  YELLOW: '\x1b[33m',             // Yellow text for warnings (75-89%)
+  RED: '\x1b[31m',                // Red text for danger (90%+)
+  RESET: '\x1b[0m',               // Reset to default color
 } as const;
 
 // Configuration utility functions

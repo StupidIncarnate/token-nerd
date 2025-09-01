@@ -93,6 +93,7 @@ program
 // Statusline command
 program
   .option('--statusline', 'Output formatted token count for statusline (reads JSON from stdin)')
+  .option('--no-colors', 'Disable ANSI color codes in statusline output')
   .option('--session <id>', 'Select specific session')
   .option('--message-id <id>', 'Go directly to detail view for specific message (requires --session)')
   .option('--current', 'Use current project session')
@@ -128,7 +129,10 @@ program
         }
         
         const tokens = await getRealTokenCount(transcriptPath);
-        const display = formatTokenCount(tokens.total, { showWarning: false });
+        const display = formatTokenCount(tokens.total, { 
+          showWarning: false,
+          showColors: !options.noColors  // Disable colors if --no-colors flag is used
+        });
         console.log(`🐿️  ${display}`);
         process.exit(0);
       } catch (error) {

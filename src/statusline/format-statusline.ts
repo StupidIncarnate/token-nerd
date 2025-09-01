@@ -8,6 +8,7 @@ import { formatTokenCount } from './config';
 
 const transcriptPath = process.argv[2];
 const tokenCount = parseInt(process.argv[3]) || 0;
+const noColors = process.argv.includes('--no-colors');
 
 if (!tokenCount) {
   // Fallback to estimate
@@ -19,7 +20,8 @@ if (!tokenCount) {
 const output = formatTokenCount(tokenCount, {
   showPercentage: true,
   showWarning: true,
-  showRemaining: true  // Show "X% left!" when critical
+  showRemaining: true,  // Show "X% left!" when critical
+  showColors: !noColors // Disable colors if --no-colors flag is present
 });
 
 console.log(output);

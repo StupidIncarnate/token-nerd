@@ -115,6 +115,9 @@ And modify your echo to include: `| $TOKEN_NERD_OUTPUT`
 ```bash
 # Test the statusline command:
 echo '{"transcript_path":"~/.claude/projects/session.jsonl"}' | token-nerd --statusline
+
+# Disable colors if your terminal doesn't support ANSI codes:
+echo '{"transcript_path":"~/.claude/projects/session.jsonl"}' | token-nerd --statusline --no-colors
 ```
 
 ### Cleanup/Uninstall

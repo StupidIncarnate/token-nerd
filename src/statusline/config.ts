@@ -8,6 +8,7 @@ import {
   CALCULATION_CONSTANTS,
   ALERT_THRESHOLDS,
   UI_CONSTANTS,
+  ANSI_COLORS,
   getTokenLimit
 } from '../config';
 
@@ -56,10 +57,24 @@ export function calculateTokenStatus(totalTokens: number, model: string = 'defau
 
 // Format token count for display
 export function formatTokenCount(tokens: number, options: FormatOptions = {}): string {
-  const { showPercentage = true, showWarning = true, showRemaining = false } = options;
+  const { showPercentage = true, showWarning = true, showRemaining = false, showColors = true } = options;
   const status = calculateTokenStatus(tokens);
   
-  let output = tokens.toLocaleString();
+  // Add color based on status (75-89% yellow, 90%+ red) - only if showColors is true
+  let colorCode = '';
+  let needsReset = false;
+  
+  if (showColors) {
+    if (status.percentage >= THRESHOLDS.DANGER_PERCENT) {
+      colorCode = ANSI_COLORS.RED;
+      needsReset = true;
+    } else if (status.percentage >= THRESHOLDS.WARNING_PERCENT) {
+      colorCode = ANSI_COLORS.YELLOW;
+      needsReset = true;
+    }
+  }
+  
+  let output = `${colorCode}${tokens.toLocaleString()}`;
   
   if (showPercentage) {
     output += ` (${status.percentage}%`;
@@ -71,6 +86,10 @@ export function formatTokenCount(tokens: number, options: FormatOptions = {}): s
   
   if (showRemaining && status.percentage >= THRESHOLDS.DANGER_PERCENT) {
     output += ` | ${status.remainingPercent}% left!`;
+  }
+  
+  if (needsReset) {
+    output += ANSI_COLORS.RESET;
   }
   
   return output;

@@ -12,6 +12,7 @@ export interface FormatOptions {
   showPercentage?: boolean;
   showWarning?: boolean;
   showRemaining?: boolean;
+  showColors?: boolean;
 }
 
 export interface TokenUsage {
