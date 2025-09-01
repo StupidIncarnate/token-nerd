@@ -42,3 +42,4 @@ export function getClaudeHooksDir(): string {
     ? path.join(os.homedir(), 'AppData', 'Roaming', 'claude', 'hooks')
     : path.join(os.homedir(), '.config', 'claude', 'hooks');
 }
+

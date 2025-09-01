@@ -5,12 +5,14 @@
  * used across the application to improve maintainability.
  */
 
-// Token limits by model (discovered through testing)
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+// Token limits based on Claude's autoCompactEnabled setting
 export const TOKEN_LIMITS = {
-  'claude-opus-4-1': 156000,      // Compacts at ~156k
-  'claude-sonnet-4': 156000,      // Appears to be same
-  'default': 156000,              // Use 156k as default (not 200k!)
-  LEGACY_DEFAULT: 200000,         // Old default for backwards compatibility
+  AUTO_COMPACT: 156000,           // When autoCompactEnabled: true (default) - compacts at ~156k
+  NO_AUTO_COMPACT: 190000,        // When autoCompactEnabled: false - higher limit before manual management needed
 } as const;
 
 // Time-based constants (all in seconds)
@@ -35,3 +37,36 @@ export const ALERT_THRESHOLDS = {
 export const UI_CONSTANTS = {
   MONITOR_INTERVAL_MS: 2000,      // Check every 2 seconds
 } as const;
+
+// Configuration utility functions
+
+/**
+ * Read Claude configuration and determine if auto-compact is enabled
+ * Returns true if autoCompactEnabled is true or not present (default behavior)
+ * Returns false if explicitly set to false
+ */
+export function isAutoCompactEnabled(): boolean {
+  try {
+    const configPath = path.join(os.homedir(), '.claude.json');
+    if (!fs.existsSync(configPath)) {
+      return true; // Default to auto-compact enabled if no config file
+    }
+
+    const configContent = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(configContent);
+    
+    // Default to true if autoCompactEnabled is not specified
+    return config.autoCompactEnabled !== false;
+  } catch (error) {
+    // If there's any error reading the config, default to auto-compact enabled
+    return true;
+  }
+}
+
+/**
+ * Get the appropriate token limit based on Claude's configuration
+ * Checks autoCompactEnabled setting and returns corresponding limit
+ */
+export function getTokenLimit(): number {
+  return isAutoCompactEnabled() ? TOKEN_LIMITS.AUTO_COMPACT : TOKEN_LIMITS.NO_AUTO_COMPACT;
+}

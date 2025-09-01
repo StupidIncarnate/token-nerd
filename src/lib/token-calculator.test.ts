@@ -17,6 +17,15 @@ jest.mock('fs', () => ({
   statSync: jest.fn()
 }));
 
+// Mock config module to return predictable token limits for testing
+jest.mock('../config', () => {
+  const originalModule = jest.requireActual('../config');
+  return {
+    ...originalModule,
+    getTokenLimit: jest.fn(() => 200000), // Use 200k for test consistency
+  };
+});
+
 // Mock readline module
 jest.mock('readline', () => ({
   createInterface: jest.fn()

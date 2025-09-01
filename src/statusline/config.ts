@@ -7,7 +7,8 @@ import {
   TOKEN_LIMITS,
   CALCULATION_CONSTANTS,
   ALERT_THRESHOLDS,
-  UI_CONSTANTS
+  UI_CONSTANTS,
+  getTokenLimit
 } from '../config';
 
 // Re-export shared constants for backwards compatibility
@@ -25,7 +26,7 @@ import type { TokenStatus, FormatOptions } from '../types';
 
 // Calculate token percentage and status
 export function calculateTokenStatus(totalTokens: number, model: string = 'default'): TokenStatus {
-  const limit = TOKEN_LIMITS[model as keyof typeof TOKEN_LIMITS] || TOKEN_LIMITS.default;
+  const limit = getTokenLimit();
   const percentage = Math.round((totalTokens / limit) * 100);
   const remaining = limit - totalTokens;
   const remainingPercent = 100 - percentage;
