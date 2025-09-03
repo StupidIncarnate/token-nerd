@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
-const { spawn } = require('child_process');
-const path = require('path');
+import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Check if we're in development (has src/ directory and no NODE_ENV=production)
-const isDevelopment = process.env.NODE_ENV !== 'production' && require('fs').existsSync(path.join(__dirname, 'src'));
+const isDevelopment = process.env.NODE_ENV !== 'production' && fs.existsSync(path.join(__dirname, 'src'));
 
 if (isDevelopment) {
   // Development: run TypeScript source directly with tsx
@@ -19,6 +24,6 @@ if (isDevelopment) {
     process.exit(code || 0);
   });
 } else {
-  // Production: require compiled JavaScript
-  require('./dist/cli/index.js');
+  // Production: import compiled JavaScript  
+  await import('./dist/cli/index.js');
 }

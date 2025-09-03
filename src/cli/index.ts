@@ -1,36 +1,32 @@
 #!/usr/bin/env -S npx tsx
 
 import { program } from 'commander';
-import { getRealTokenCount } from '../statusline/get-real-tokens';
-import { formatTokenCount } from '../statusline/config';
-import { selectSession, listSessions } from '../lib/session-tracker';
-import { selectSessionWithTreeView } from '../lib/session-tree-view';
-import { launchTUI } from '../lib/tui-components';
+import { getRealTokenCount } from '../entries/statusline/get-real-tokens';
+import { formatTokenCount } from '../entries/statusline/config';
+import { listSessions } from '../lib/session-tracker';
+import { selectSessionWithTreeView } from '../lib/ink-session-tree-wrapper';
+import { InkTui } from '../entries/tui/ink-tui';
 import { findSessionJsonl } from '../lib/jsonl-utils';
-import * as path from 'path';
-import * as os from 'os';
 
 // Import version from package.json
-const packageJson = require('../../package.json');
-const { spawn } = require('child_process');
+const packageJson = JSON.parse(await import('fs').then(fs => fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf-8')));
+import { spawn } from 'child_process';
 
 async function runSessionBrowser(): Promise<void> {
   while (true) {
-    console.log('📂 Claude Code Session Browser');
-    console.log('Navigate with ↑↓ arrows, expand/collapse projects with Enter, select sessions\n');
-    
     const selectedSessionId = await selectSessionWithTreeView();
     if (!selectedSessionId) {
       // User cancelled session selection
       break;
     }
-
-    console.log(`\n🔍 Analyzing session ${selectedSessionId}...`);
     
     // Find the actual JSONL file path safely
     const actualJsonlPath = await findSessionJsonl({ sessionId: selectedSessionId });
     
-    const exitCode = await launchTUI(selectedSessionId, actualJsonlPath);
+    const exitCode = await InkTui({
+      sessionId: selectedSessionId, 
+      jsonlPath: actualJsonlPath 
+    });
     if (exitCode === 2) {
       // Exit code 2 means "go back to session tree" - continue the loop
       console.clear();
@@ -163,7 +159,12 @@ program
         }
       }
       
-      const exitCode = await launchTUI(options.session, actualJsonlPath, messageId, contentPart);
+      const exitCode = await InkTui({
+        sessionId: options.session, 
+        jsonlPath: actualJsonlPath, 
+        messageId, 
+        contentPart 
+      });
       process.exit(exitCode);
     } else {
       // No session specified - will be handled by default behavior below

@@ -10,7 +10,7 @@ import {
   UI_CONSTANTS,
   ANSI_COLORS,
   getTokenLimitSync
-} from '../config';
+} from '../../config';
 
 // Re-export shared constants for backwards compatibility
 export { TOKEN_LIMITS };
@@ -23,7 +23,7 @@ export const THRESHOLDS = {
   MONITOR_INTERVAL: UI_CONSTANTS.MONITOR_INTERVAL_MS,
 } as const;
 
-import type { TokenStatus, FormatOptions } from '../types';
+import type { TokenStatus, FormatOptions } from '../../types';
 
 // Calculate token percentage and status
 export function calculateTokenStatus(totalTokens: number, model: string = 'default'): TokenStatus {

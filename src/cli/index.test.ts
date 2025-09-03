@@ -22,23 +22,23 @@ jest.mock('../lib/session-tracker', () => ({
 
 // Mock the session tree view
 const mockSelectSessionWithTreeView = jest.fn() as jest.MockedFunction<any>;
-jest.mock('../lib/session-tree-view', () => ({
+jest.mock('../lib/ink-session-tree-wrapper', () => ({
   selectSessionWithTreeView: mockSelectSessionWithTreeView
 }));
 
 // Mock the TUI components to prevent console bleedthrough
 const mockLaunchTUI = jest.fn() as jest.MockedFunction<any>;
-jest.mock('../lib/tui-components', () => ({
+jest.mock('../entries/tui/tui', () => ({
   launchTUI: mockLaunchTUI
 }));
 
 // Mock the statusline functions  
 const mockGetRealTokenCount = jest.fn() as jest.MockedFunction<any>;
 const mockFormatTokenCount = jest.fn() as jest.MockedFunction<any>;
-jest.mock('../statusline/get-real-tokens', () => ({
+jest.mock('../entries/statusline/get-real-tokens', () => ({
   getRealTokenCount: mockGetRealTokenCount
 }));
-jest.mock('../statusline/config', () => ({
+jest.mock('../entries/statusline/config', () => ({
   formatTokenCount: mockFormatTokenCount
 }));
 
@@ -100,7 +100,7 @@ describe('CLI Integration Tests', () => {
       const mockTokens = { total: 12345, percentage: 75 };
       mockGetRealTokenCount.mockResolvedValue(mockTokens);
       
-      const { getRealTokenCount } = await import('../statusline/get-real-tokens');
+      const { getRealTokenCount } = await import('../entries/statusline/get-real-tokens');
       const result = await getRealTokenCount('/test/path.jsonl');
       
       expect(result).toEqual(mockTokens);
@@ -111,7 +111,7 @@ describe('CLI Integration Tests', () => {
       const mockFormatted = '12,345 (75%)';
       mockFormatTokenCount.mockReturnValue(mockFormatted);
       
-      const { formatTokenCount } = await import('../statusline/config');
+      const { formatTokenCount } = await import('../entries/statusline/config');
       const result = formatTokenCount(12345, { showWarning: false });
       
       expect(result).toEqual(mockFormatted);
@@ -140,9 +140,9 @@ describe('CLI Integration Tests', () => {
     it('should have all required dependencies available', async () => {
       // Verify all the mocked modules are available
       const sessionTracker = await import('../lib/session-tracker');
-      const sessionTreeView = await import('../lib/session-tree-view');
-      const statuslineTokens = await import('../statusline/get-real-tokens');
-      const statuslineConfig = await import('../statusline/config');
+      const sessionTreeView = await import('../lib/ink-session-tree-wrapper');
+      const statuslineTokens = await import('../entries/statusline/get-real-tokens');
+      const statuslineConfig = await import('../entries/statusline/config');
       
       expect(sessionTracker.listSessions).toBeDefined();
       expect(sessionTracker.selectSession).toBeDefined();

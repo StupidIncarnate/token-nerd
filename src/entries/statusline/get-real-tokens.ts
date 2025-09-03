@@ -6,11 +6,11 @@
 
 import * as fs from 'fs';
 import { calculateTokenStatus } from './config';
-import { getCurrentTokenCount } from '../lib/token-calculator';
-import { JsonlReader } from '../lib/jsonl-utils';
-import { ReverseFileReader } from '../lib/reverse-reader';
+import { getCurrentTokenCount } from '../../lib/token-calculator';
+import { JsonlReader } from '../../lib/jsonl-utils';
+import { ReverseFileReader } from '../../lib/reverse-reader';
 
-import type { TokenUsage, TokenResult } from '../types';
+import type { TokenUsage, TokenResult } from '../../types';
 
 export async function getRealTokenCount(transcriptPath: string): Promise<TokenResult> {
   const total = await getCurrentTokenCount(transcriptPath);
@@ -83,7 +83,7 @@ export async function getRealTokenCount(transcriptPath: string): Promise<TokenRe
 }
 
 // Only run main() if this file is executed directly (not imported)
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   // Main execution
   async function main() {
     const transcriptPath = process.argv[2];

@@ -12,7 +12,7 @@ export type { JsonlMessage, TranscriptMessage, JsonlFileInfo } from './jsonl';
 export type { Session } from './session';
 
 // UI types
-export type { ListItem, ListView, ListActions, SortMode, TerminalState } from './ui';
+export type { ListItem, ListView, ListActions, SortMode, TerminalState, ViewType } from './ui';
 
 // Statusline types
 export type { TokenStatus, FormatOptions, TokenUsage, TokenResult } from './statusline';

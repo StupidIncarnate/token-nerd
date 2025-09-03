@@ -21,14 +21,14 @@ Types and interfaces for the project are located in `/src/types`. Make sure to r
 
 ### Function Design Principles
 - **Single Responsibility**: Each function must do exactly one thing well
-- **Maximum 50 lines per function**: Break larger functions into focused helpers
+- **Maximum 100 lines per function**: Break larger functions into focused helpers
 - **Descriptive names**: Function names should clearly state their purpose
 - **Pure functions when possible**: Avoid side effects, return values explicitly
 - **Object parameters**: All function parameters must use object destructuring with inline types: `someFn({ someProp }: { someProp: string }): [returnTypes]`
 
 ### File Organization Rules
 - **One primary concern per file**: Don't mix unrelated functionality
-- **Maximum 200 lines per file**: Consider separation when files grow larger
+- **Maximum 500 lines per file for implementation**: Consider separation when files grow larger
 - **Logical groupings**: Group related functions into focused modules
 - **Clear dependencies**: Import only what you need, avoid circular dependencies
 - **Types are stored in one folder**: When making new types or interfaces, they must be stored in `src/types`, not in the implementation file. 

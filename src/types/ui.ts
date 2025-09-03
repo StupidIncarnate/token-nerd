@@ -33,9 +33,14 @@ export interface ListActions {
   onQuit: () => void;
   onToggleExpand?: (item: ListItem, index: number) => void;
   onSelectionChange?: (newIndex: number) => void;
+  onTokenSort?: () => void;
+  onConversationSort?: () => void;
+  onOperationSort?: () => void;
 }
 
 export type SortMode = 'conversation' | 'tokens' | 'operation';
+
+export type ViewType = 'main' | 'subAgent' | 'details';
 
 export interface TerminalState {
   bundles: Bundle[];

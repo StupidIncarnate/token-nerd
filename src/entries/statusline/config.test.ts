@@ -1,8 +1,8 @@
 import { formatTokenCount, calculateTokenStatus } from './config';
-import { ANSI_COLORS } from '../config';
+import { ANSI_COLORS } from '../../config';
 
 // Mock the config module before importing
-jest.mock('../config', () => {
+jest.mock('../../config', () => {
   const originalModule = jest.requireActual('../config');
   return {
     ...originalModule,

@@ -219,3 +219,4 @@ export async function selectSessionWithTreeView(): Promise<string | null> {
   await treeView.initialize();
   return treeView.selectSession({ autoExpandCurrent: true, highlightFirst: true });
 }
+
