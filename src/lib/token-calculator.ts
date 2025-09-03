@@ -51,7 +51,7 @@ export async function getTokenCount(transcriptPath: string): Promise<number> {
 /**
  * Gets the current token count from the last message in JSONL transcript
  * Used specifically for statusline to show current context window usage
- * OPTIMIZED: Uses reverse file reading and caching
+ * OPTIMIZED: Uses reverse file reading and caching but finds highest cumulative total
  */
 export async function getCurrentTokenCount(transcriptPath: string): Promise<number> {
   if (!fs.existsSync(transcriptPath)) {
@@ -63,69 +63,38 @@ export async function getCurrentTokenCount(transcriptPath: string): Promise<numb
     key: `current-tokens:${transcriptPath}`,
     filePath: transcriptPath,
     computeFn: async () => {
-      try {
-        // Try optimized reverse reading first
-        const lastLine = await ReverseFileReader.readLastLine({ filePath: transcriptPath });
-        
-        if (lastLine) {
-          try {
-            const msg: TranscriptMessage = JSON.parse(lastLine);
-            const usage = msg.usage || msg.message?.usage;
-            
-            if (usage) {
-              return calculateCumulativeTotal(usage);
-            }
-          } catch (parseError) {
-            // Try scanning recent lines
-            const recentLines = await ReverseFileReader.readLastLines({ 
-              filePath: transcriptPath, 
-              maxLines: 10 
-            });
-            
-            for (const line of recentLines) {
-              try {
-                const msg: TranscriptMessage = JSON.parse(line);
-                const usage = msg.usage || msg.message?.usage;
-                
-                if (usage) {
-                  return calculateCumulativeTotal(usage);
-                }
-              } catch {
-                continue;
-              }
-            }
-          }
-        }
-      } catch (reverseError) {
-        // Fallback to streaming approach for compatibility with tests
-        let lastTotal = 0;
+      // The statusline needs the cumulative session total, not just individual message usage
+      // Use the same logic as getTokenCount to find the highest total seen
+      let highestTotal = 0;
 
-        try {
-          await JsonlReader.streamMessages(transcriptPath, (msg) => {
-            const usage = msg.usage || msg.message?.usage;
-            
-            if (usage) {
-              lastTotal = calculateCumulativeTotal(usage);
-            }
-            
-            return null;
-          });
+      try {
+        await JsonlReader.streamMessages(transcriptPath, (msg) => {
+          // Check both .usage and .message.usage (different message formats)
+          const usage = msg.usage || msg.message?.usage;
           
-          if (lastTotal > 0) {
-            return lastTotal;
+          if (usage) {
+            // Calculate total for this message
+            const messageTotal = calculateCumulativeTotal(usage);
+            
+            // Track the highest total we've seen (tokens accumulate)
+            if (messageTotal > highestTotal) {
+              highestTotal = messageTotal;
+            }
           }
-        } catch (streamError) {
-          // Continue to file size fallback
+          
+          return null; // We don't need to collect results, just track highestTotal
+        });
+      } catch (error) {
+        // Fall back to file size estimate if parsing fails
+        try {
+          const stats = fs.statSync(transcriptPath);
+          return Math.round(stats.size / 100);
+        } catch (statError) {
+          return 0;
         }
       }
 
-      // Final fallback to file size estimate
-      try {
-        const stats = fs.statSync(transcriptPath);
-        return Math.round(stats.size / 100);
-      } catch (statError) {
-        return 0;
-      }
+      return highestTotal;
     }
   });
 }

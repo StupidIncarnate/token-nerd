@@ -36,15 +36,10 @@ export async function getRealTokenCount(transcriptPath: string): Promise<TokenRe
         const usage = msg.usage || msg.message?.usage;
         
         if (usage) {
-          const messageTotal = (usage.input_tokens || 0) + 
-                              (usage.output_tokens || 0) + 
-                              (usage.cache_read_input_tokens || 0) + 
-                              (usage.cache_creation_input_tokens || 0);
-          
-          if (messageTotal === total) {
-            lastMessageWithUsage = usage as TokenUsage;
-            break; // Found it, stop scanning
-          }
+          // Use the first (most recent) message with usage data we find
+          // This is the same message that getCurrentTokenCount() used for the total
+          lastMessageWithUsage = usage as TokenUsage;
+          break; // Found it, stop scanning
         }
       } catch {
         continue; // Skip malformed lines
@@ -52,18 +47,13 @@ export async function getRealTokenCount(transcriptPath: string): Promise<TokenRe
     }
   } catch (reverseError) {
     // Fallback to streaming if reverse reading fails
+    // Find the last message with usage data (most recent in chronological order)
     await JsonlReader.streamMessages(transcriptPath, (msg) => {
       const usage = msg.usage || msg.message?.usage;
       
       if (usage) {
-        const messageTotal = (usage.input_tokens || 0) + 
-                            (usage.output_tokens || 0) + 
-                            (usage.cache_read_input_tokens || 0) + 
-                            (usage.cache_creation_input_tokens || 0);
-        
-        if (messageTotal === total) {
-          lastMessageWithUsage = usage as TokenUsage;
-        }
+        // Keep updating with each message that has usage (last one wins)
+        lastMessageWithUsage = usage as TokenUsage;
       }
       
       return null;
